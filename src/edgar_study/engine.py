@@ -195,6 +195,7 @@ def run(args):
             translator_model=args.model,
             estimator_model=args.model,
             loss_func=upstream["loss_functions"].quadratic_loss,
+            requests=go,
             fit_kwargs={
                 "param_penalty_weight": PENALTY,
                 **{k: defaults[k].default for k in ("fit_params", "tol", "use_param_estimator")},

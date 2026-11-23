@@ -1,5 +1,6 @@
 """Offline checks that the fast fitters agree with upstream's."""
 
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -62,7 +63,7 @@ def test_bounded_lm_stops_once_every_cell_reaches_tolerance():
     x, y = curves.synthetic_cells(16, 200)
     start = np.stack([winner.estimator(np.asarray(x[i]), np.asarray(y[i])) for i in range(16)])
     fit = fitting.fit_lm_bounded(winner.model, start, x, y, max_iterations=500)
-    assert fit.converged == 16
+    assert fit.stopped == 16
     assert 0 < fit.iterations < 500
     assert fit.params.shape == start.shape
 
@@ -139,3 +140,23 @@ def test_multistart_never_ends_worse_than_its_first_start():
 
     assert np.all(_squared_error(multi.params, theta, y) <= _squared_error(single, theta, y) + 1e-5)
     assert multi.best_start.shape == (6,)
+
+
+def test_multistart_needs_at_least_one_start():
+    with pytest.raises(ValueError, match="at least one start"):
+        fitting.perturbed_starts(np.ones((2, 2)), starts=0)
+
+
+def test_integer_starts_are_perturbed_as_floats():
+    starts = fitting.perturbed_starts(np.ones((2, 3), dtype=int), starts=3, seed=0)
+
+    assert np.issubdtype(starts.dtype, np.floating)
+    assert not np.allclose(starts[1], starts[0])
+
+
+def test_multistart_logs_how_many_fits_hit_the_iteration_cap(caplog):
+    theta, y, start = _cosine_cells()
+    with caplog.at_level(logging.INFO, logger="edgar_study.fitting"):
+        fitting.fit_multistart(_cosine, start, theta, y, starts=3, max_iterations=1)
+
+    assert any("of 18 fits stopped before the cap" in record.getMessage() for record in caplog.records)

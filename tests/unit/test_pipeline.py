@@ -1,10 +1,12 @@
 import asyncio
+import logging
 import time
 from types import SimpleNamespace
 
 from edgar_study.pipeline import install
 
 X, Y, CLIENT = object(), object(), object()
+FIT_S = 0.005
 FIT_KWARGS = {"param_penalty_weight": 0.01, "fit_params": True, "tol": 1e-6, "use_param_estimator": True}
 
 
@@ -15,8 +17,9 @@ def loss(prediction, target):
 class Fake:
     """Upstream's stage functions with set delays, logging when each event happens."""
 
-    def __init__(self, delays):
+    def __init__(self, delays, broken=()):
         self.delays = delays
+        self.broken = set(broken)
         self.events = []
         self.fits = 0
 
@@ -58,6 +61,8 @@ class Fake:
         img_dir=None,
     ):
         await asyncio.sleep(0.01)
+        if neuron_model_code_string in self.broken:
+            return f"estimator {neuron_model_code_string}", None
         return f"estimator {neuron_model_code_string}", SimpleNamespace(
             code=neuron_model_code_string, temp=temp, model=llm_name
         )
@@ -76,6 +81,7 @@ class Fake:
         use_param_estimator=True,
     ):
         self.fits += 1
+        time.sleep(FIT_S)
         self.events.append(("fit", neuron_model.code, time.monotonic()))
         return (
             neuron_model.code,
@@ -86,7 +92,7 @@ class Fake:
         )
 
 
-async def upstream_loop(engine, codes, estimator_temp=1.5):
+async def upstream_loop(engine, codes, estimator_temp=1.5, fit_kwargs=FIT_KWARGS):
     islands = [{"next": code} for code in codes]
     proposals = await asyncio.gather(
         *[
@@ -124,7 +130,9 @@ async def upstream_loop(engine, codes, estimator_temp=1.5):
         ]
     )
     return [
-        engine.objective(translation[1], estimator[1], loss_func=loss, x=X, y=Y, **FIT_KWARGS)
+        engine.objective(translation[1], estimator[1], loss_func=loss, x=X, y=Y, **fit_kwargs)
+        if translation[1] is not None and estimator[1] is not None
+        else None
         for translation, estimator in zip(translations, estimators, strict=True)
     ]
 
@@ -138,14 +146,25 @@ def recorded(translate):
     return translate_and_record
 
 
-def pipelined(fake):
+def idle():
+    return SimpleNamespace(queued=0, blocked_s=0.0)
+
+
+def pipelined(fake, requests=None):
     engine = SimpleNamespace(
         generate_new_neuron_model=fake.generate_new_neuron_model,
         translate_to_jax=recorded(fake.translate_to_jax),
         generate_new_parameter_estimator=fake.generate_new_parameter_estimator,
         objective=fake.objective,
     )
-    install(engine, translator_model="tiny", estimator_model="little", loss_func=loss, fit_kwargs=FIT_KWARGS)
+    engine.pipeline = install(
+        engine,
+        translator_model="tiny",
+        estimator_model="little",
+        loss_func=loss,
+        fit_kwargs=FIT_KWARGS,
+        requests=requests or idle(),
+    )
     return engine
 
 
@@ -205,3 +224,49 @@ def test_an_early_call_that_fails_is_retried_as_upstream_would_make_it():
     plain = asyncio.run(upstream_loop(Fake(DELAYS), list(DELAYS)))
 
     assert asyncio.run(upstream_loop(pipelined(fake), list(DELAYS))) == plain
+
+
+class QueuedUntil:
+    """Requests that stay queued until `code`'s proposal has returned."""
+
+    def __init__(self, fake, code):
+        self.fake, self.code, self.blocked_s = fake, code, 0.0
+
+    @property
+    def queued(self):
+        return 0 if any(event[:2] == ("proposed", self.code) for event in self.fake.events) else 1
+
+
+def test_early_fits_wait_while_requests_are_queued():
+    fake = Fake(DELAYS)
+    plain = asyncio.run(upstream_loop(Fake(DELAYS), list(DELAYS)))
+    piped = asyncio.run(upstream_loop(pipelined(fake, QueuedUntil(fake, "slow")), list(DELAYS)))
+
+    times = {(event, code): t for event, code, t in fake.events}
+    assert piped == plain
+    assert times[("fit", "fast")] >= times[("proposed", "slow")]
+    assert fake.fits == len(DELAYS)
+
+
+def test_early_fits_are_counted_as_time_the_event_loop_was_blocked():
+    requests = idle()
+    asyncio.run(upstream_loop(pipelined(Fake(DELAYS), requests), list(DELAYS)))
+
+    assert requests.blocked_s >= 2 * FIT_S
+
+
+def test_a_discarded_early_fit_is_logged(caplog):
+    fake = Fake(DELAYS)
+    with caplog.at_level(logging.WARNING, logger="edgar_study.pipeline"):
+        asyncio.run(upstream_loop(pipelined(fake), list(DELAYS), fit_kwargs={**FIT_KWARGS, "tol": 1e-3}))
+
+    assert fake.fits == 2 * len(DELAYS)
+    assert sum("discarded" in record.message for record in caplog.records) == len(DELAYS)
+
+
+def test_programs_upstream_never_fits_are_dropped_by_the_next_generation():
+    engine = pipelined(Fake(DELAYS, broken={"medium"}))
+    asyncio.run(upstream_loop(engine, list(DELAYS)))
+    asyncio.run(upstream_loop(engine, list(DELAYS)))
+
+    assert len(engine.pipeline.programs) == 1

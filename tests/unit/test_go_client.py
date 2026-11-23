@@ -103,3 +103,58 @@ async def check_client(directory):
 
 def test_client_ledger_and_tier_mapping(tmp_path):
     asyncio.run(check_client(tmp_path))
+
+
+def client(directory, handler, max_concurrency=16):
+    os.environ.pop("OPENCODE_API_KEY_FILE", None)
+    os.environ["OPENCODE_API_KEY"] = "test-key"
+    go = GoClient(
+        directory,
+        Ledger(directory / "spend.jsonl"),
+        session_id="test",
+        free_models=["hy4-flash-free"],
+        max_concurrency=max_concurrency,
+    )
+    go._http = httpx.AsyncClient(base_url="https://example.invalid", transport=httpx.MockTransport(handler))
+    return go
+
+
+async def check_queue(directory):
+    release = asyncio.Event()
+
+    async def handler(request):
+        await release.wait()
+        status, payload = ok("reply")
+        return httpx.Response(status, json=payload)
+
+    go = client(directory, handler, max_concurrency=1)
+    calls = [asyncio.ensure_future(go.chat("hy4-flash-free", "prompt")) for _ in range(3)]
+    await asyncio.sleep(0.05)
+    assert go.queued == 2
+    release.set()
+    assert await asyncio.gather(*calls) == ["reply"] * 3
+    assert go.queued == 0
+    await go.close()
+
+
+def test_the_client_counts_requests_waiting_for_a_slot(tmp_path):
+    asyncio.run(check_queue(tmp_path))
+
+
+async def check_blocked(directory):
+    go = client(directory, None)
+
+    async def handler(request):
+        go.blocked_s += 2.5
+        status, payload = ok("reply")
+        return httpx.Response(status, json=payload)
+
+    go._http = httpx.AsyncClient(base_url="https://example.invalid", transport=httpx.MockTransport(handler))
+    await go.chat("hy4-flash-free", "prompt")
+    await go.close()
+    row = json.loads((directory / "api_calls.jsonl").read_text().splitlines()[-1])
+    assert row["blocked_s"] == 2.5
+
+
+def test_each_call_records_how_long_the_event_loop_was_blocked_during_it(tmp_path):
+    asyncio.run(check_blocked(tmp_path))

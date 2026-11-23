@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import contextlib
 import contextvars
 import json
 import os
@@ -96,6 +97,8 @@ class GoClient:
         self.free_models = set(free_models)
         self.allow_paid = allow_paid
         self.semaphore = asyncio.Semaphore(max_concurrency)
+        self.queued = 0
+        self.blocked_s = 0.0
         self.max_tokens = max_tokens
         self._http = httpx.AsyncClient(
             base_url=BASE_URL,
@@ -135,14 +138,15 @@ class GoClient:
         }
 
         for attempt in (1, 2):
-            async with self.semaphore:
-                started = time.time()
+            async with self._slot():
+                started, blocked_at_start = time.time(), self.blocked_s
                 try:
                     response = await self._http.post("/chat/completions", json=body)
                     payload: Any
                     status, payload = response.status_code, response.json()
                 except (httpx.HTTPError, ValueError) as error:
                     status, payload = None, {"error": f"{type(error).__name__}: {error}"}
+                finished, blocked = time.time(), self.blocked_s - blocked_at_start
             usage = payload.get("usage") or {}
             self.ledger.add(list_cost(usage), model=model, role=record["role"], session=self.session_id)
             choice: Any = (payload.get("choices") or [{}])[0]
@@ -152,7 +156,8 @@ class GoClient:
                     **record,
                     "attempt": attempt,
                     "status": status,
-                    "latency_s": round(time.time() - started, 3),
+                    "latency_s": round(finished - started, 3),
+                    "blocked_s": round(blocked, 3),
                     "served_model": payload.get("model"),
                     "usage": usage,
                     "finish_reason": choice.get("finish_reason"),
@@ -166,6 +171,19 @@ class GoClient:
             if not retry or attempt == 2:
                 return None
             await asyncio.sleep(5)
+
+    @contextlib.asynccontextmanager
+    async def _slot(self):
+        """Hold one of the concurrent-request slots, counting requests that wait for one."""
+        self.queued += 1
+        try:
+            await self.semaphore.acquire()
+        finally:
+            self.queued -= 1
+        try:
+            yield
+        finally:
+            self.semaphore.release()
 
     def _log(self, row):
         with self.calls_path.open("a") as stream:

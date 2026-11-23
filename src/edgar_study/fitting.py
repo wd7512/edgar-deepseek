@@ -49,7 +49,7 @@ log = logging.getLogger(__name__)
 class BoundedFit(NamedTuple):
     params: np.ndarray
     iterations: int
-    converged: int
+    stopped: int
 
 
 class MultiStartFit(NamedTuple):
@@ -119,11 +119,11 @@ def make_objective(upstream_objective, fitter, lm_iterations=LM_ITERATIONS):
             fit = fit_lm_bounded(neuron_model, params, x_train, y_train, max_iterations=lm_iterations)
             cells = params.shape[0]
             log.info(
-                "lm-bounded stopped after %d iterations with %d of %d cells converged",
+                "lm-bounded ran %d iterations; %d of %d cells stopped before the cap",
                 fit.iterations,
-                fit.converged,
+                fit.stopped,
                 cells,
-                extra={"iterations": fit.iterations, "converged": fit.converged, "cells": cells},
+                extra={"iterations": fit.iterations, "stopped": fit.stopped, "cells": cells},
             )
             fitted = fit.params
         else:
@@ -272,7 +272,7 @@ def fit_lm_bounded(
     A cell stops once an accepted step lowers its squared error by less than `tolerance` of the
     current error, or once its damping saturates; the loop ends when every cell has stopped or after
     `max_iterations`. Returns the fitted parameters, the iterations run and how many cells stopped
-    by tolerance rather than by the iteration cap.
+    (by tolerance or saturated damping) before the iteration cap.
     """
     (params, x, y), _, n_cells = _shard(params, x, y)
     cost, lm_step = _least_squares(model, x, y)
@@ -310,7 +310,11 @@ def fit_lm_bounded(
 
 def perturbed_starts(params, starts, seed=0, scale=MULTISTART_SCALE):
     """`params` followed by `starts - 1` copies with Gaussian noise of `scale` × (|parameter| + 1)."""
+    if starts < 1:
+        raise ValueError(f"Multi-start needs at least one start, got {starts}.")
     params = np.asarray(params)
+    if not np.issubdtype(params.dtype, np.floating):
+        params = params.astype(np.float32)
     noise = np.random.default_rng(seed).standard_normal((starts - 1, *params.shape))
     jittered = params + scale * noise * (np.abs(params) + 1)
     return np.concatenate([params[None], jittered.astype(params.dtype)])
@@ -339,6 +343,12 @@ def fit_multistart(
         y_all,
         tolerance=tolerance,
         max_iterations=max_iterations,
+    )
+    log.info(
+        "multi-start ran %d iterations; %d of %d fits stopped before the cap",
+        fit.iterations,
+        fit.stopped,
+        k * cells,
     )
     cost, _ = _least_squares(model, jnp.asarray(x_all), jnp.asarray(y_all))
     costs = np.asarray(cost(jnp.asarray(fit.params))).reshape(k, cells)

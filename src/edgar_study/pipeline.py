@@ -5,7 +5,13 @@ estimator, and only then fits the programs one by one. Proposals with reasoning 
 latency, so most programs sit idle while the slowest proposal finishes. This module patches
 upstream's stage functions so that, when a proposal returns, its translation and estimator are
 requested immediately with exactly the arguments upstream's loop would pass, and the program is
-fitted as soon as both arrive.
+fitted as soon as both arrive and no model request is waiting for a slot.
+
+A fit is ordinary blocking work on the event loop, so while it runs no reply is read and no queued
+request is sent. Waiting for an empty queue keeps fits from delaying requests that have not been sent;
+requests already in flight keep generating on the server. The time each fit blocks the loop is added
+to the client's `blocked_s`, which each logged call reports alongside its latency. A worker thread is
+not an option: upstream's estimator timeout uses signals, which only work on the main thread.
 
 When upstream later makes those calls itself, a call whose arguments match the early one gets its
 result; any other call runs normally. Upstream's own code and arguments decide every result; only
@@ -17,11 +23,13 @@ import asyncio
 import contextlib
 import inspect
 import logging
+import time
 
 log = logging.getLogger(__name__)
 
 ESTIMATOR_K_MAX = 2
 ESTIMATOR_MAX_LINES = 100
+QUEUE_POLL_S = 0.2
 SIMPLE = (str, int, float, bool, type(None), list, tuple, dict)
 
 
@@ -62,7 +70,7 @@ class _Program:
 
 
 class Pipeline:
-    def __init__(self, engine, translator_model, estimator_model, loss_func, fit_kwargs):
+    def __init__(self, engine, translator_model, estimator_model, loss_func, fit_kwargs, requests):
         self.propose = engine.generate_new_neuron_model
         self.translate = engine.translate_to_jax
         self.estimate = engine.generate_new_parameter_estimator
@@ -71,14 +79,22 @@ class Pipeline:
         self.estimator_model = estimator_model
         self.loss_func = loss_func
         self.fit_kwargs = fit_kwargs
+        self.requests = requests
         self.programs = []
 
     async def proposal(self, *args, **kwargs):
+        self._prune()
         result = await self.propose(*args, **kwargs)
         code = result[0] if result else None
         if code is not None:
             self._start(code, _bind(self.propose, args, kwargs).arguments)
         return result
+
+    def _prune(self):
+        """Drop programs from earlier generations that upstream has taken but will never fit."""
+        self.programs = [
+            p for p in self.programs if not (p.translation_taken and p.estimator_taken and p.fit.done())
+        ]
 
     def _start(self, code, proposal):
         translation_call = _bind(self.translate, (code, proposal["client"], self.translator_model), {})
@@ -110,6 +126,8 @@ class Pipeline:
             _, estimator = await program.estimator
         except Exception:
             return None
+        while self.requests.queued and not program.claimed:
+            await asyncio.sleep(QUEUE_POLL_S)
         if model is None or estimator is None or program.claimed:
             return None
         call = _bind(
@@ -122,11 +140,14 @@ class Pipeline:
                 **self.fit_kwargs,
             },
         )
+        started = time.monotonic()
         try:
             result = _run(self.objective, call)
         except Exception:
             log.exception("Early fit failed; upstream will fit this program itself.")
             return None
+        finally:
+            self.requests.blocked_s += time.monotonic() - started
         program.fit_call = call
         return result
 
@@ -162,15 +183,21 @@ class Pipeline:
                 continue
             self.programs.remove(program)
             program.claimed = True
-            if program.fit.done() and program.fit_call is not None and _matches(call, program.fit_call):
-                return program.fit.result()
+            if program.fit.done() and program.fit_call is not None:
+                if _matches(call, program.fit_call):
+                    return program.fit.result()
+                log.warning("Early fit discarded: upstream fitted this program with different arguments.")
             break
         return self.objective(*args, **kwargs)
 
 
-def install(hypothesis_engine, translator_model, estimator_model, loss_func, fit_kwargs):
-    """Patch upstream's stage functions so each program moves on as soon as its proposal returns."""
-    pipeline = Pipeline(hypothesis_engine, translator_model, estimator_model, loss_func, fit_kwargs)
+def install(hypothesis_engine, translator_model, estimator_model, loss_func, fit_kwargs, requests):
+    """Patch upstream's stage functions so each program moves on as soon as its proposal returns.
+
+    `requests` is the model client: its `queued` count gates early fits and its `blocked_s` total
+    receives the time they spend blocking the event loop.
+    """
+    pipeline = Pipeline(hypothesis_engine, translator_model, estimator_model, loss_func, fit_kwargs, requests)
     hypothesis_engine.generate_new_neuron_model = pipeline.proposal
     hypothesis_engine.translate_to_jax = pipeline.translation
     hypothesis_engine.generate_new_parameter_estimator = pipeline.estimator

@@ -51,61 +51,64 @@ def per_cell(model, loss, params, x, y):
     return np.asarray(values)
 
 
-def measure(name, model, loss, params, seconds, x, y, train, test):
-    train_cells = per_cell(model, loss, params, x[:, train], y[:, train])
-    test_cells = per_cell(model, loss, params, x[:, test], y[:, test])
+def losses(model, loss, params, x, y, train, test):
+    return per_cell(model, loss, params, x[:, train], y[:, train]), per_cell(
+        model, loss, params, x[:, test], y[:, test]
+    )
+
+
+def measure(name, params, seconds, train_cells, test_cells, scored):
+    """Mean losses over `scored`, the cells finite under both fits, so the two rows are like-for-like."""
     return {
         "fit": name,
         "seconds": round(seconds, 2),
-        "train_loss": float(np.nanmean(train_cells)),
-        "score": float(np.nanmean(test_cells) + PENALTY * params.shape[1]),
-        "train_cells": train_cells,
+        "train_loss": float(np.mean(train_cells[scored])),
+        "score": float(np.mean(test_cells[scored]) + PENALTY * params.shape[1]),
+        "train_cells": train_cells[scored],
     }
 
 
 def compare(curve, engine, loss, x, y, starts, iterations, tolerance):
     np.random.seed(0)
     with contextlib.redirect_stdout(io.StringIO()):
-        _, _, _, start = engine.objective(
+        initial, _, _, start = engine.objective(
             curve.model, curve.estimator, loss, x, y, param_penalty_weight=PENALTY, max_iter=0
         )
+    if not np.isfinite(initial):
+        log.warning("%s: upstream's objective failed on the estimator's start; skipping it.", curve.name)
+        return None
     start = np.asarray(start)
     train, test = trial_split(y.shape[1])
     x_train, y_train = x[:, train], y[:, train]
 
     began = time.perf_counter()
     default = fitting.fit_lm_bounded(curve.model, start, x_train, y_train).params
-    default_row = measure(
-        "lm-bounded", curve.model, loss, default, time.perf_counter() - began, x, y, train, test
-    )
+    default_seconds = time.perf_counter() - began
 
     began = time.perf_counter()
     floor = fitting.fit_multistart(
         curve.model, start, x_train, y_train, starts=starts, max_iterations=iterations, tolerance=tolerance
     )
-    floor_row = measure(
-        f"multistart ×{starts}",
-        curve.model,
-        loss,
-        floor.params,
-        time.perf_counter() - began,
-        x,
-        y,
-        train,
-        test,
-    )
+    floor_seconds = time.perf_counter() - began
+
+    default_losses = losses(curve.model, loss, default, x, y, train, test)
+    floor_losses = losses(curve.model, loss, floor.params, x, y, train, test)
+    scored = np.logical_and.reduce([np.isfinite(values) for values in (*default_losses, *floor_losses)])
+    default_row = measure("lm-bounded", default, default_seconds, *default_losses, scored)
+    floor_row = measure(f"multistart ×{starts}", floor.params, floor_seconds, *floor_losses, scored)
 
     improved = floor_row["train_cells"] < default_row["train_cells"] * (1 - IMPROVED)
     summary = {
         "program": curve.name,
         "params": curve.n_params,
         "cells": int(x.shape[0]),
+        "cells_scored": int(scored.sum()),
         "default": {k: v for k, v in default_row.items() if k != "train_cells"},
         "floor": {k: v for k, v in floor_row.items() if k != "train_cells"},
         "train_gap": default_row["train_loss"] - floor_row["train_loss"],
         "score_gap": default_row["score"] - floor_row["score"],
         "cells_improved_by_1pct": float(np.mean(improved)),
-        "cells_won_by_a_perturbed_start": float(np.mean(floor.best_start > 0)),
+        "cells_won_by_a_perturbed_start": float(np.mean(floor.best_start[scored] > 0)),
     }
     log.info("%s: %s", curve.name, json.dumps(summary))
     return summary
@@ -113,9 +116,9 @@ def compare(curve, engine, loss, x, y, starts, iterations, tolerance):
 
 def table(rows):
     lines = [
-        "| Program | Params | Fit | Seconds | Train loss | Score | Train gap | Score gap "
+        "| Program | Params | Cells scored | Fit | Seconds | Train loss | Score | Train gap | Score gap "
         "| Cells improved >1% | Won by perturbed start |",
-        "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         for key in ("default", "floor"):
@@ -127,7 +130,8 @@ def table(rows):
                 else " |  |  | "
             )
             lines.append(
-                f"| {row['program']} | {row['params']} | {fit['fit']} | {fit['seconds']:.2f} | "
+                f"| {row['program']} | {row['params']} | {row['cells_scored']}/{row['cells']} | "
+                f"{fit['fit']} | {fit['seconds']:.2f} | "
                 f"{fit['train_loss']:.4f} | {fit['score']:.4f} | {extra} |"
             )
     return "\n".join(lines)
@@ -138,7 +142,9 @@ def main():
     parser.add_argument(
         "--dataset", type=Path, default=ROOT / "data" / "gratings_drifting_GT1_2019_04_12_1.npy"
     )
-    parser.add_argument("--curves", nargs="+", default=list(DEFAULT_CURVES))
+    parser.add_argument(
+        "--curves", nargs="+", default=list(DEFAULT_CURVES), choices=[c.name for c in curves.CURVES]
+    )
     parser.add_argument("--cells", type=int, default=264)
     parser.add_argument("--starts", type=int, default=5)
     parser.add_argument("--iterations", type=int, default=300)
@@ -150,7 +156,10 @@ def main():
     engine, loss = upstream["hypothesis_engine"], upstream["loss_functions"].quadratic_loss
     x, y = discovery_cells(args.dataset, upstream["utils"], args.cells)
     selected = [c for c in curves.CURVES if c.name in args.curves]
+    if x.shape[0] < args.cells:
+        log.warning("Only %d discovery cells available; %d requested.", x.shape[0], args.cells)
     rows = [compare(c, engine, loss, x, y, args.starts, args.iterations, args.tolerance) for c in selected]
+    rows = [row for row in rows if row is not None]
     print(table(rows))
 
 

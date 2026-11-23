@@ -19,7 +19,7 @@
 
 - The three LLM stages take 72% of the run; fitting and the final refit together 16%; upstream's plots 12%.
 - Each fit takes about 1.1 s on 264 cells and each final refit about 0.7 s. All 8 proposals of a generation ran at once, so proposal wall time is set by the slowest call: about 54 s per generation against a 43 s mean call.
-- At full size (48 proposals on 1,055 cells) fitting grows about 4× per program and the LLM stages need three rounds of 16, so fitting should stay below a third of a generation.
+- At full size (48 proposals on 1,055 cells) fitting grows about 4× per program and the LLM stages need three rounds of 16, so on this 15-core host fitting should stay below a third of a generation. Hosts with fewer cores fit much more slowly (see the pipelining section).
 
 ## 2026-11-23, run `20261123-163928-3a269b`: per-program pipelining
 
@@ -34,4 +34,5 @@ Same command and settings as above, with each program's translation, estimator a
 
 - LLM latency varies from run to run, so the totals are not comparable on their own; the time after the last proposal returns is what pipelining controls. It fell by 8–10 s per generation (about 30%).
 - What remains is the slowest program's own translation and estimator (they cannot start before its proposal returns) and upstream's plots.
-- At full size the saving should grow: with 48 proposals in three rounds of 16, the fits of earlier rounds (2–4 s each on 1,055 cells) run while later rounds are still waiting on the LLM.
+- Correction (review of this run): an early fit is blocking work on the event loop. While it runs, requests already sent keep generating on the server, but queued requests are not sent and replies are not read. Fits therefore overlap only with in-flight requests, not with queued ones, and this run's proposal latencies include time the loop spent fitting. Early fits now wait until no request is queued, and each logged request records the blocked time as `blocked_s`.
+- These shares are specific to this host and size. On a 4-core machine at full size (1,055 cells), real programs took 10–70 s to fit and fitting was about 65% of the run.
