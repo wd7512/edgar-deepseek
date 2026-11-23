@@ -1,0 +1,1 @@
+`edgar run` now starts each program's translation, estimator and fit as soon as its own proposal returns, instead of waiting for the slowest proposal of the generation. Upstream's calls with matching arguments get those results and anything else runs normally; `--no-pipeline` restores upstream's ordering.

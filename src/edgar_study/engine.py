@@ -12,6 +12,7 @@ attributes are replaced at runtime:
 
 import asyncio
 import functools
+import inspect
 import json
 import logging
 import os
@@ -20,7 +21,7 @@ import time
 import uuid
 from pathlib import Path
 
-from edgar_study import fitting, timing
+from edgar_study import fitting, pipeline, timing
 from edgar_study.datasets import ACTIVITY_THRESHOLD, CONCENTRATION_THRESHOLD, load_dataset, prepare
 from edgar_study.go_client import GoClient, Ledger, fetch_models, is_free, load_key, role
 from edgar_study.upstream import PENALTY, code_key, import_upstream
@@ -187,6 +188,18 @@ def run(args):
     )
     timings = timing.Timings(run_dir / "timings.jsonl")
     timing.install(hypothesis_engine, timings)
+    if not args.no_pipeline:
+        defaults = inspect.signature(hypothesis_engine.main).parameters
+        pipeline.install(
+            hypothesis_engine,
+            translator_model=args.model,
+            estimator_model=args.model,
+            loss_func=upstream["loss_functions"].quadratic_loss,
+            fit_kwargs={
+                "param_penalty_weight": PENALTY,
+                **{k: defaults[k].default for k in ("fit_params", "tol", "use_param_estimator")},
+            },
+        )
 
     manifest = {
         "run_id": run_id,
@@ -208,6 +221,7 @@ def run(args):
         "temperature_scale": args.temperature_scale,
         "concurrency": args.concurrency,
         "fitter": fitter,
+        "pipeline": not args.no_pipeline,
         "islands": args.islands,
         "batch_size": args.batch_size,
         "spend_before_usd": ledger.total,

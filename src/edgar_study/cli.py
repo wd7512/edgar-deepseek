@@ -189,6 +189,11 @@ def main():
     )
     run.add_argument("--concurrency", type=int, default=16)
     run.add_argument("--no-images", action="store_true", help="Text-only feedback condition.")
+    run.add_argument(
+        "--no-pipeline",
+        action="store_true",
+        help="Wait for every proposal before translating, estimating and fitting, as upstream does.",
+    )
     run.add_argument("--islands", type=int, default=8)
     run.add_argument("--batch-size", type=int, default=6, help="Proposals per island per generation.")
     run.add_argument(

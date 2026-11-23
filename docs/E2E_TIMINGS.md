@@ -20,3 +20,18 @@
 - The three LLM stages take 72% of the run; fitting and the final refit together 16%; upstream's plots 12%.
 - Each fit takes about 1.1 s on 264 cells and each final refit about 0.7 s. All 8 proposals of a generation ran at once, so proposal wall time is set by the slowest call: about 54 s per generation against a 43 s mean call.
 - At full size (48 proposals on 1,055 cells) fitting grows about 4× per program and the LLM stages need three rounds of 16, so fitting should stay below a third of a generation.
+
+## 2026-11-23, run `20261123-163928-3a269b`: per-program pipelining
+
+Same command and settings as above, with each program's translation, estimator and fit started as soon as its own proposal returns (`--no-pipeline` turns this off). 15 of 16 programs scored; every stage made the same number of calls as the unpipelined run (16 translations, 16 estimators, 15 fits), so no work was repeated.
+
+| | Upstream order | Pipelined |
+| --- | ---: | ---: |
+| Total | 196 s | 180 s |
+| Slowest proposal, generation 0 / 1 | 84.6 s / 22.0 s | 93.8 s / 16.4 s |
+| Last proposal back → next stage, generation 0 | 31.2 s | 23.6 s |
+| Last proposal back → next stage, generation 1 | 28.2 s | 18.0 s |
+
+- LLM latency varies from run to run, so the totals are not comparable on their own; the time after the last proposal returns is what pipelining controls. It fell by 8–10 s per generation (about 30%).
+- What remains is the slowest program's own translation and estimator (they cannot start before its proposal returns) and upstream's plots.
+- At full size the saving should grow: with 48 proposals in three rounds of 16, the fits of earlier rounds (2–4 s each on 1,055 cells) run while later rounds are still waiting on the LLM.
