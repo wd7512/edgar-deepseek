@@ -7,9 +7,10 @@ seeds are always scored as references. Settings match upstream's final evaluatio
 
 import inspect
 import json
+import time
 from typing import Any
 
-from edgar_study import fitting
+from edgar_study import fitting, timing
 from edgar_study.upstream import code_key, combined_file, import_upstream, score_program
 
 MAX_ITER = 2_000  # upstream's final evaluation
@@ -21,12 +22,15 @@ def rescore(args):
 
     from edgar_study.datasets import load_dataset, prepare
 
+    started = time.time()
     upstream = import_upstream(args.upstream.resolve())
     utils, seeds = upstream["utils"], upstream["seed_programs"]
     run_dir = args.run.resolve()
     # Score with the run's own fitter unless told otherwise; runs before --fitter existed used upstream's.
     run_fitter = json.loads((run_dir / "manifest.json").read_text()).get("fitter", "upstream")
     fitter = fitting.install(upstream["hypothesis_engine"], args.fitter or run_fitter)
+    timings = timing.Timings()
+    upstream["hypothesis_engine"].objective = timings.wrap(upstream["hypothesis_engine"].objective, "fit")
     database = combined_file(run_dir, "programs_db.csv")
     if database is None:
         raise SystemExit(f"No combined programs_db.csv under {run_dir}; has the run finished?")
@@ -112,6 +116,7 @@ def rescore(args):
             else None
         ),
         "candidates": candidates,
+        "timings": timing.summarise(timings.records, started, time.time()),
     }
     out = run_dir / "rescore.json"
     out.write_text(json.dumps(result, indent=2, default=float) + "\n")

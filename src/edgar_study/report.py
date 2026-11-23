@@ -99,6 +99,7 @@ def report(args):
         "models": manifest["models"],
         "status": manifest.get("status"),
         "wall_hours": round((manifest.get("finished", manifest["started"]) - manifest["started"]) / 3600, 2),
+        "stage_timings": manifest.get("timings"),
         "generations": generations,
         "proposals_attempted": attempted,
         "programs_scored": int(loss.size),

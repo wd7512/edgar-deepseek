@@ -13,16 +13,19 @@ attributes are replaced at runtime:
 import asyncio
 import functools
 import json
+import logging
 import os
 import subprocess
 import time
 import uuid
 from pathlib import Path
 
-from edgar_study import fitting
+from edgar_study import fitting, timing
 from edgar_study.datasets import ACTIVITY_THRESHOLD, CONCENTRATION_THRESHOLD, load_dataset, prepare
 from edgar_study.go_client import GoClient, Ledger, fetch_models, is_free, load_key, role
 from edgar_study.upstream import PENALTY, code_key, import_upstream
+
+log = logging.getLogger(__name__)
 
 IMAGE_READER_PROMPT = (
     "You are helping an AI scientist who cannot see images. The image shows tuning-curve fits "
@@ -182,6 +185,8 @@ def run(args):
         image_model=args.image_model,
         translations_path=run_dir / "translations.jsonl",
     )
+    timings = timing.Timings(run_dir / "timings.jsonl")
+    timing.install(hypothesis_engine, timings)
 
     manifest = {
         "run_id": run_id,
@@ -229,7 +234,14 @@ def run(args):
         raise
     finally:
         os.chdir(previous)
-        manifest.update(status=status, finished=time.time(), spend_after_usd=ledger.total)
+        finished = time.time()
+        manifest.update(
+            status=status,
+            finished=finished,
+            spend_after_usd=ledger.total,
+            timings=timing.summarise(timings.records, manifest["started"], finished),
+        )
+        log.info("Stage timings: %s", json.dumps(manifest["timings"]))
         (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return run_dir
 

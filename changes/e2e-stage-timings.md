@@ -1,0 +1,1 @@
+`edgar run` now records how long each stage takes (LLM proposals, translations, estimators, fitting, upstream's final refit, plots, population updates) in `timings.jsonl` and as a summary in `manifest.json`, which `edgar report` shows; `edgar rescore` records its own fit and total time. This shows where an end-to-end run spends its time before choosing what to speed up.
