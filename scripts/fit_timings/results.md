@@ -2,7 +2,25 @@
 
 Newest first. See `README.md` for what each column means.
 
-## 2026-11-23, `small`, commit `f5f7a25`
+## 2026-11-23, `real`, commit `cc709c0`
+
+- Command: `uv run scripts/fit_timings/run.py --size real --curves double-gaussian winner`
+- Data: 1055 synthetic cells × 428 trials, drawn from the winner (H27)
+- Adam steps: 1000; LM iterations: 100; median of 1 call(s)
+- Host: Intel(R) Xeon(R) Processor @ 2.10GHz, 4 cores, 4 JAX cpu device(s), JAX 0.6.0
+
+| Program | Paper ID | Params | Fitter | Iterations | Total (s) | Estimator (s) | Compile (s) | Checks + fit (s) | Train loss | Score |
+| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| double-gaussian | S2 | 5 | upstream | 1000 | 21.31 | 0.08 | 1.42 | 19.82 | 21.1730 | 22.3159 |
+| winner | H27 | 11 | upstream | 1000 | 21.70 | 0.09 | 0.94 | 20.67 | 16.7513 | 18.6607 |
+| double-gaussian | S2 | 5 | adam | 1000 | 9.53 | 0.08 | 0.90 | 8.55 | 21.1730 | 22.3159 |
+| winner | H27 | 11 | adam | 1000 | 12.19 | 0.09 | 0.57 | 11.54 | 16.7528 | 18.6616 |
+| double-gaussian | S2 | 5 | lm | 100 | 2.77 | 0.08 | 0.69 | 2.00 | 21.1492 | 22.3004 |
+| winner | H27 | 11 | lm | 100 | 3.65 | 0.12 | 0.64 | 2.89 | 17.4564 | 19.4415 |
+
+At search size the fit dominates: compilation is under 1.5 s and the estimator under 0.15 s, against 20 s of fitting under upstream's loop. Compiled `adam` gives the same losses 1.8–2.2× faster. `lm` is 3.3–3.4× faster than `adam` and 5.9–7.7× faster than upstream. It fits the double Gaussian slightly better, but the winner worse (train 17.46 against 16.75) at 100 iterations, so its iteration count needs checking before it is used for speed. Only the baseline and the winner were run; the full ten-curve real run is still to do.
+
+## 2026-11-23, `small`, commit `cc709c0`
 
 - Command: `uv run scripts/fit_timings/run.py --size small --repeats 3`
 - Data: 16 synthetic cells × 144 trials, drawn from the winner (H27)
