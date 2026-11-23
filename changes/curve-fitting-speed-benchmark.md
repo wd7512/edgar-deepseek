@@ -1,0 +1,1 @@
+Added `edgar_study.curves`, ten paper tuning-curve equations (baseline double Gaussian, winner H27 and the Supplementary Text 3 family tree), and `tests/speed/curve_fitting.py`, which times each under every fitter through upstream's `objective` to guide speeding up the fit loop.
