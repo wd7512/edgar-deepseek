@@ -117,7 +117,7 @@ A full-size search cannot finish in 30 minutes on 4 CPU cores. So the fast run s
 - **Fitting:** the compiled, core-sharded Adam (`--fitter auto`), with upstream's 1,000 and 2,000 step budgets unchanged.
 - **Test:** `rescore` on the full 527 selection and 528 locked cells, exactly as for the other runs.
 
-Command: the fast-search example in the [README](../README.md#search-runs).
+Command: the fast-search example in the [README](../README.md#run).
 
 Artifacts are in [artifacts/fast](artifacts/fast).
 
