@@ -35,7 +35,7 @@ SIZES = {
     "small": {"n_cells": 16, "n_trials": 144, "steps": 100},
     "real": {"n_cells": 1_055, "n_trials": 428, "steps": 1_000},
 }
-FITTERS = ("upstream", "adam", "lm")
+FITTERS = ("upstream", "adam", "lm", "lm-bounded")
 COMPILE_EVENTS = (
     "/jax/core/compile/jaxpr_trace_duration",
     "/jax/core/compile/jaxpr_to_mlir_module_duration",
@@ -53,6 +53,19 @@ class CompileClock:
     def _record(self, event, duration, **_):
         if event in COMPILE_EVENTS:
             self.seconds += duration
+
+
+class StopLog(logging.Handler):
+    """Keeps the iteration count and converged cells that `lm-bounded` logs for its last fit."""
+
+    def __init__(self):
+        super().__init__(logging.INFO)
+        self.last = None
+        logging.getLogger(fitting.__name__).addHandler(self)
+
+    def emit(self, record):
+        if hasattr(record, "iterations"):
+            self.last = record
 
 
 def timed_estimator(estimator, spent):
@@ -102,6 +115,7 @@ def benchmark(fitters, selected, n_cells, n_trials, steps, lm_iterations, repeat
     engine, loss = modules["hypothesis_engine"], modules["loss_functions"].quadratic_loss
     x, y = curves.synthetic_cells(n_cells, n_trials)
     clock = CompileClock()
+    stops = StopLog()
     time_fit(engine.objective, selected[0], loss, x[:2], y[:2], 1, clock)
     rows = []
     for fitter in fitters:
@@ -111,14 +125,20 @@ def benchmark(fitters, selected, n_cells, n_trials, steps, lm_iterations, repeat
             else fitting.make_objective(engine.objective, fitter, lm_iterations)
         )
         for curve in selected:
+            stops.last = None
             calls = [time_fit(objective, curve, loss, x, y, steps, clock) for _ in range(repeats)]
             last = calls[-1]
+            if stops.last is not None:
+                stop = stops.last.__dict__
+                iterations = f"{stop['iterations']} ({stop['converged']}/{stop['cells']} converged)"
+            else:
+                iterations = lm_iterations if fitter == "lm" else steps
             row = {
                 "program": curve.name,
                 "paper_id": curve.paper_id,
                 "params": curve.n_params,
                 "fitter": fitter,
-                "iterations": lm_iterations if fitter == "lm" else steps,
+                "iterations": iterations,
                 **{
                     k: statistics.median(c[k] for c in calls)
                     for k in ("total", "estimator", "compile", "rest")

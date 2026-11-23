@@ -9,25 +9,43 @@ upstream's checks, data split and scoring by calling upstream's own `objective` 
 * `adam`:     the same Adam schedule and best-parameter bookkeeping, compiled into one XLA loop.
 * `lm`:       batched Levenberg–Marquardt. Each cell is an independent least-squares problem with a
               handful of parameters, so second-order steps converge in tens of iterations.
+* `lm-bounded`: Levenberg–Marquardt that moves each parameter at most `LM_BOUNDED_MAX_STEP` per
+              iteration and stops each cell once an accepted step lowers its cost by less than
+              `LM_BOUNDED_TOLERANCE` (relative), or after `lm_iterations`. Unbounded steps can throw a
+              parameter past a program's clip, where its gradient is zero and it stays stuck; the
+              bound keeps fits near the path Adam takes, so it matches Adam's fits in far less time.
 
 Both fitters split the cells across every JAX device. On a CPU, `edgar_study/__init__.py` exposes
 one device per core before JAX starts, because XLA otherwise runs this elementwise work on about
 one thread.
 
-`auto` picks `adam` when JAX only has a CPU and `upstream` otherwise. `lm` fits each cell to
-convergence, which lowers training error but loses upstream's implicit early stopping and scores
-held-out trials differently, so it is opt-in.
+`auto` picks `adam` when JAX only has a CPU and `upstream` otherwise. `lm` and `lm-bounded` fit
+each cell to convergence instead of upstream's fixed 1,000 steps, which changes scores slightly, so
+they are opt-in.
 """
 
 import functools
+import logging
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 
-FITTERS = ("auto", "upstream", "adam", "lm")
+FITTERS = ("auto", "upstream", "adam", "lm", "lm-bounded")
 LM_ITERATIONS = 100
+LM_BOUNDED_MAX_STEP = 0.25
+LM_BOUNDED_TOLERANCE = 1e-4
+MAX_DAMPING = 1e7
+
+log = logging.getLogger(__name__)
+
+
+class BoundedFit(NamedTuple):
+    params: np.ndarray
+    iterations: int
+    converged: int
 
 
 def resolve(fitter):
@@ -45,6 +63,9 @@ def install(hypothesis_engine, fitter, lm_iterations=LM_ITERATIONS):
 
 
 def make_objective(upstream_objective, fitter, lm_iterations=LM_ITERATIONS):
+    if fitter not in FITTERS[2:]:
+        raise ValueError(f"Unknown fitter {fitter!r}.")
+
     @functools.wraps(upstream_objective)
     def objective(
         neuron_model,
@@ -86,6 +107,17 @@ def make_objective(upstream_objective, fitter, lm_iterations=LM_ITERATIONS):
 
         if fitter == "lm" and loss_func.__name__ == "quadratic_loss":
             fitted = fit_lm(neuron_model, params, x_train, y_train, lm_iterations)
+        elif fitter == "lm-bounded" and loss_func.__name__ == "quadratic_loss":
+            fit = fit_lm_bounded(neuron_model, params, x_train, y_train, max_iterations=lm_iterations)
+            cells = params.shape[0]
+            log.info(
+                "lm-bounded stopped after %d iterations with %d of %d cells converged",
+                fit.iterations,
+                fit.converged,
+                cells,
+                extra={"iterations": fit.iterations, "converged": fit.converged, "cells": cells},
+            )
+            fitted = fit.params
         else:
             fitted = fit_adam(neuron_model, loss_func, params, x_train, y_train, max_iter)
 
@@ -158,14 +190,12 @@ def fit_adam(model, loss_func, params, x, y, max_iter, learning_rate=3e-3):
     return jax.device_get(run(params))[:n_cells]
 
 
-def fit_lm(model, params, x, y, iterations=LM_ITERATIONS):
-    """Batched Levenberg–Marquardt on each cell's squared error. Steps are accepted only when they
-    lower that cell's error, so every cell ends at least as well fitted as its starting point."""
+def _least_squares(model, x, y):
+    """Per-cell cost and damped Gauss–Newton step for `model`'s squared error on (x, y)."""
 
     def residual(p, xc, yc):
         return model(xc, *p) - yc
 
-    (params, x, y), _, n_cells = _shard(params, x, y)
     residuals = jax.vmap(residual)
     jacobians = jax.vmap(jax.jacfwd(residual))
 
@@ -174,21 +204,37 @@ def fit_lm(model, params, x, y, iterations=LM_ITERATIONS):
         c = jnp.sum(r * r, axis=1)
         return jnp.where(jnp.isfinite(c), c, jnp.inf)
 
-    def body(_, state):
-        p, damping, c = state
+    def step(p, damping):
         r, J = residuals(p, x, y), jacobians(p, x, y)
         gradient = jnp.einsum("ctk,ct->ck", J, r)
         hessian = jnp.einsum("ctk,ctl->ckl", J, J)
         diagonal = jnp.diagonal(hessian, axis1=1, axis2=2)
         scale = jnp.maximum(diagonal, 1e-9 * jnp.max(diagonal, axis=1, keepdims=True) + 1e-12)
         damped = hessian + jax.vmap(jnp.diag)(damping[:, None] * scale)
-        step = jnp.linalg.solve(damped, -gradient[..., None])[..., 0]
-        candidate = p + jnp.where(jnp.isfinite(step), step, 0.0)
+        s = jnp.linalg.solve(damped, -gradient[..., None])[..., 0]
+        return jnp.where(jnp.isfinite(s), s, 0.0)
+
+    return cost, step
+
+
+def _update_damping(damping, accept):
+    return jnp.clip(jnp.where(accept, damping / 3, damping * 4), 1e-7, MAX_DAMPING)
+
+
+def fit_lm(model, params, x, y, iterations=LM_ITERATIONS):
+    """Batched Levenberg–Marquardt on each cell's squared error. Steps are accepted only when they
+    lower that cell's error, so every cell ends at least as well fitted as its starting point."""
+    (params, x, y), _, n_cells = _shard(params, x, y)
+    cost, lm_step = _least_squares(model, x, y)
+
+    def body(_, state):
+        p, damping, c = state
+        candidate = p + lm_step(p, damping)
         new_cost = cost(candidate)
         accept = new_cost < c
         return (
             jnp.where(accept[:, None], candidate, p),
-            jnp.clip(jnp.where(accept, damping / 3, damping * 4), 1e-7, 1e7),
+            _update_damping(damping, accept),
             jnp.where(accept, new_cost, c),
         )
 
@@ -198,6 +244,55 @@ def fit_lm(model, params, x, y, iterations=LM_ITERATIONS):
         return jax.lax.fori_loop(0, iterations, body, start)[0]
 
     return jax.device_get(run(params))[:n_cells]
+
+
+def fit_lm_bounded(
+    model,
+    params,
+    x,
+    y,
+    max_step=LM_BOUNDED_MAX_STEP,
+    tolerance=LM_BOUNDED_TOLERANCE,
+    max_iterations=LM_ITERATIONS,
+):
+    """Levenberg–Marquardt with each parameter's move capped at `max_step` per iteration.
+
+    A cell stops once an accepted step lowers its squared error by less than `tolerance` of the
+    current error, or once its damping saturates; the loop ends when every cell has stopped or after
+    `max_iterations`. Returns the fitted parameters, the iterations run and how many cells stopped
+    by tolerance rather than by the iteration cap.
+    """
+    (params, x, y), _, n_cells = _shard(params, x, y)
+    cost, lm_step = _least_squares(model, x, y)
+
+    def cond(state):
+        i, _, _, _, done = state
+        return (i < max_iterations) & ~jnp.all(done)
+
+    def body(state):
+        i, p, damping, c, done = state
+        step = lm_step(p, damping)
+        biggest = jnp.max(jnp.abs(step), axis=1, keepdims=True)
+        candidate = p + step * jnp.minimum(1.0, max_step / jnp.maximum(biggest, 1e-30))
+        new_cost = cost(candidate)
+        accept = ~done & (new_cost < c)
+        converged = (accept & (c - new_cost <= tolerance * c)) | (damping >= MAX_DAMPING)
+        return (
+            i + 1,
+            jnp.where(accept[:, None], candidate, p),
+            jnp.where(done, damping, _update_damping(damping, accept)),
+            jnp.where(accept, new_cost, c),
+            done | converged,
+        )
+
+    @jax.jit
+    def run(p):
+        start = (0, p, jnp.full(p.shape[0], 1e-3, p.dtype), cost(p), jnp.zeros(p.shape[0], bool))
+        i, p, _, _, done = jax.lax.while_loop(cond, body, start)
+        return p, i, done
+
+    fitted, iterations, done = jax.device_get(run(params))
+    return BoundedFit(fitted[:n_cells], int(iterations), int(np.sum(done[:n_cells])))
 
 
 def benchmark_report(rows):
