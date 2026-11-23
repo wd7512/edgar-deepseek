@@ -18,4 +18,6 @@ The code reference is [EDGAR at 0943922](https://github.com/reillytilbury/EDGAR/
 | Requests | Upstream sends all 48 requests per step at once. The runner allows at most eight concurrent requests and retries once on a network error, 5xx, or non-quota 429. Failed requests return `None`, which upstream already counts as a failed program. |
 | Final selection | Upstream picks its winner on the evaluation half (1,055 cells). `edgar_study.cli rescore` adds a strict holdout: it takes the top 10 unique learned programs by discovery loss, selects on the 527 selection cells, then scores the winner and both Gaussian seeds once on the 528 locked test cells. Upstream's own final step has already seen those locked cells, which the report discloses. |
 
+The upstream paper notebooks (`figures/`), `tests.py` and `requirements.txt` were removed from this fork; they remain at the pinned commit.
+
 No explicit code license file is present in the pinned upstream tree. This fork uses GitHub's native fork relationship and keeps its baseline additions separate from the original source files.

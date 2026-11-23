@@ -40,12 +40,20 @@ def split_model(name):
     return model, effort or None
 
 
-def install(hypothesis_engine, utils, go, default_effort=None, temperature_scale=1.0,
-            image_model=None, translations_path=None):
+def install(
+    hypothesis_engine,
+    utils,
+    go,
+    default_effort=None,
+    temperature_scale=1.0,
+    image_model=None,
+    translations_path=None,
+):
     """Swap upstream's LLM layer for the GoClient `go`; patches module attributes."""
 
-    async def call_llm_async(prompt_text, client=None, model_name=None, temperature=1.0,
-                             thinking_budget=1, img_bytes=None):
+    async def call_llm_async(
+        prompt_text, client=None, model_name=None, temperature=1.0, thinking_budget=1, img_bytes=None
+    ):
         if prompt_text is None:
             return None
         model, effort = split_model(model_name)
@@ -57,12 +65,19 @@ def install(hypothesis_engine, utils, go, default_effort=None, temperature_scale
                 role.reset(token)
             if description is None:
                 return None
-            prompt_text += ("\n\n[The image is not attached. A separate vision model described it as follows.]\n"
-                            + description)
+            prompt_text += (
+                "\n\n[The image is not attached. A separate vision model described it as follows.]\n"
+                + description
+            )
             img_bytes = None
-        return await go.chat(model, prompt_text, temperature=round(temperature * temperature_scale, 4),
-                             effort=effort or default_effort, img_bytes=img_bytes,
-                             temperature_upstream=temperature)
+        return await go.chat(
+            model,
+            prompt_text,
+            temperature=round(temperature * temperature_scale, 4),
+            effort=effort or default_effort,
+            img_bytes=img_bytes,
+            temperature_upstream=temperature,
+        )
 
     utils.call_llm_async = call_llm_async
     for name in ("create_program_prompt", "create_parameter_estimator_prompt", "create_linked_prompt"):
@@ -74,6 +89,7 @@ def install(hypothesis_engine, utils, go, default_effort=None, temperature_scale
         async def wrapper(*args, **kwargs):
             role.set(label)  # each gathered coroutine runs in its own task context
             return await original(*args, **kwargs)
+
         return wrapper
 
     original_translate = hypothesis_engine.translate_to_jax
@@ -82,14 +98,24 @@ def install(hypothesis_engine, utils, go, default_effort=None, temperature_scale
         jax_code, func = await original_translate(code_string, *args, **kwargs)
         if translations_path and code_string is not None:
             with open(translations_path, "a") as stream:
-                stream.write(json.dumps({"numpy_sha256": code_key(code_string), "numpy_code": code_string,
-                                         "jax_code": jax_code, "compiled": func is not None}) + "\n")
+                stream.write(
+                    json.dumps(
+                        {
+                            "numpy_sha256": code_key(code_string),
+                            "numpy_code": code_string,
+                            "jax_code": jax_code,
+                            "compiled": func is not None,
+                        }
+                    )
+                    + "\n"
+                )
         return jax_code, func
 
     hypothesis_engine.translate_to_jax = tag(translate_and_record, "translation")
     hypothesis_engine.generate_new_neuron_model = tag(hypothesis_engine.generate_new_neuron_model, "proposal")
     hypothesis_engine.generate_new_parameter_estimator = tag(
-        hypothesis_engine.generate_new_parameter_estimator, "estimator")
+        hypothesis_engine.generate_new_parameter_estimator, "estimator"
+    )
 
 
 def _force_gemini_prompt(original, *args, **kwargs):
@@ -121,8 +147,8 @@ def discovery_subset(dataset, extract_response, fraction, path):
     response, angles, _ = load_dataset(dataset, extract_response)
     _, _, _, indices = prepare(response, angles, "strict-holdout-v1")
     discovery = indices["discovery_cell_ids"]  # recording rows, already in random order
-    cells = np.sort(discovery[:max(4, round(fraction * len(discovery)))])
-    np.save(path, {"sresp": response[cells], "istim": angles}, allow_pickle=True)
+    cells = np.sort(discovery[: max(4, round(fraction * len(discovery)))])
+    np.save(path, {"sresp": response[cells], "istim": angles}, allow_pickle=True)  # ty: ignore[invalid-argument-type]
     return cells
 
 
@@ -138,28 +164,55 @@ def run(args):
     run_dir.mkdir(parents=True)
     ledger = Ledger(args.results.resolve() / "spend.jsonl")
     free = [name for name, entry in fetch_models(load_key()).items() if is_free(entry)]
-    go = GoClient(run_dir, ledger, session_id=f"edgar-{run_id}", free_models=free,
-                  allow_paid=args.allow_paid, max_concurrency=args.concurrency, max_tokens=args.max_tokens)
-    install(hypothesis_engine, upstream["utils"], go, default_effort=args.reasoning_effort,
-            temperature_scale=args.temperature_scale, image_model=args.image_model,
-            translations_path=run_dir / "translations.jsonl")
+    go = GoClient(
+        run_dir,
+        ledger,
+        session_id=f"edgar-{run_id}",
+        free_models=free,
+        allow_paid=args.allow_paid,
+        max_concurrency=args.concurrency,
+        max_tokens=args.max_tokens,
+    )
+    install(
+        hypothesis_engine,
+        upstream["utils"],
+        go,
+        default_effort=args.reasoning_effort,
+        temperature_scale=args.temperature_scale,
+        image_model=args.image_model,
+        translations_path=run_dir / "translations.jsonl",
+    )
 
     manifest = {
-        "run_id": run_id, "repo_sha": git_sha(Path(__file__).resolve().parents[1]),
-        "upstream_commit": upstream["commit"], "dataset": str(args.dataset), "iterations": args.iterations,
+        "run_id": run_id,
+        "repo_sha": git_sha(Path(__file__).resolve().parents[2]),
+        "upstream_commit": upstream["commit"],
+        "dataset": str(args.dataset),
+        "iterations": args.iterations,
         "time_limit_min": args.time_limit,
-        "models": {"translator": args.model, "proposer": args.model, "estimator": args.model,
-                   "large_proposer": large_model(args), "image_reader": args.image_model},
-        "use_image_feedback": not args.no_images, "max_tokens": args.max_tokens,
-        "reasoning_effort": args.reasoning_effort, "temperature_scale": args.temperature_scale,
-        "concurrency": args.concurrency, "fitter": fitter,
-        "islands": args.islands, "batch_size": args.batch_size,
-        "spend_before_usd": ledger.total, "started": time.time(),
+        "models": {
+            "translator": args.model,
+            "proposer": args.model,
+            "estimator": args.model,
+            "large_proposer": large_model(args),
+            "image_reader": args.image_model,
+        },
+        "use_image_feedback": not args.no_images,
+        "max_tokens": args.max_tokens,
+        "reasoning_effort": args.reasoning_effort,
+        "temperature_scale": args.temperature_scale,
+        "concurrency": args.concurrency,
+        "fitter": fitter,
+        "islands": args.islands,
+        "batch_size": args.batch_size,
+        "spend_before_usd": ledger.total,
+        "started": time.time(),
     }
     if args.cell_fraction < 1:
         data_path = run_dir / "search_cells.npy"
-        cells = discovery_subset(args.dataset, upstream["utils"].extract_stimulus_related_response,
-                                 args.cell_fraction, data_path)
+        cells = discovery_subset(
+            args.dataset, upstream["utils"].extract_stimulus_related_response, args.cell_fraction, data_path
+        )
         manifest.update(cell_fraction=args.cell_fraction, search_cell_ids=cells.tolist())
     else:
         data_path = args.dataset
@@ -185,12 +238,20 @@ async def _main(hypothesis_engine, go, args, data_path):
     ring = [(island + 1) % args.islands for island in range(args.islands)]  # upstream's migration topology
     try:
         await hypothesis_engine.main(
-            n_iterations=args.iterations, time_limit=args.time_limit,
-            n_islands=args.islands, batch_size=args.batch_size,
-            exploration_topology=ring, exploitation_topology=ring,
-            use_image_feedback=not args.no_images, use_large_every=3, param_penalty_weight=PENALTY,
-            tiny_lm_name=args.model, little_lm_name=args.model, large_lm_name=large_model(args),
-            activity_thresh=ACTIVITY_THRESHOLD, conc_thresh=CONCENTRATION_THRESHOLD,
+            n_iterations=args.iterations,
+            time_limit=args.time_limit,
+            n_islands=args.islands,
+            batch_size=args.batch_size,
+            exploration_topology=ring,
+            exploitation_topology=ring,
+            use_image_feedback=not args.no_images,
+            use_large_every=3,
+            param_penalty_weight=PENALTY,
+            tiny_lm_name=args.model,
+            little_lm_name=args.model,
+            large_lm_name=large_model(args),
+            activity_thresh=ACTIVITY_THRESHOLD,
+            conc_thresh=CONCENTRATION_THRESHOLD,
             data_path=str(data_path),
         )
     finally:

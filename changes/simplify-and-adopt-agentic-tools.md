@@ -1,0 +1,1 @@
+Moved the study package to `src/edgar_study` with an `edgar` command, converted its tests to pytest under `tests/unit`, removed unused upstream files, and adopted wills-agentic-tools (`gate`, `check`, `delegate`) with a CI workflow.

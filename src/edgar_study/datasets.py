@@ -62,14 +62,12 @@ def prepare(response, angles, protocol):
     else:
         groups["selection"] = cell_order[cut:]
 
-    trial_order = np.asarray(
-        jax.random.permutation(jax.random.PRNGKey(TRIAL_SEED), jnp.arange(trial_count))
-    )
+    trial_order = np.asarray(jax.random.permutation(jax.random.PRNGKey(TRIAL_SEED), jnp.arange(trial_count)))
     indices = {
         "eligible_cell_ids": cells,
         "recording_trial_ids": trials,
-        "fit_trial_columns": trial_order[:trial_count // 2],
-        "score_trial_columns": trial_order[trial_count // 2:],
+        "fit_trial_columns": trial_order[: trial_count // 2],
+        "score_trial_columns": trial_order[trial_count // 2 :],
         **{f"{name}_cell_ids": cells[rows] for name, rows in groups.items()},
     }
     return x, y, groups, indices

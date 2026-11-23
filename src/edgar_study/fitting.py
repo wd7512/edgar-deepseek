@@ -46,21 +46,42 @@ def install(hypothesis_engine, fitter, lm_iterations=LM_ITERATIONS):
 
 def make_objective(upstream_objective, fitter, lm_iterations=LM_ITERATIONS):
     @functools.wraps(upstream_objective)
-    def objective(neuron_model, param_estimator, loss_func, x, y, param_penalty_weight=0.1,
-                  fit_params=True, random_seed=0, FAILED_PROGRAM_COST=jnp.inf, tol=1e-2,
-                  max_iter=1_000, use_param_estimator=True):
+    def objective(
+        neuron_model,
+        param_estimator,
+        loss_func,
+        x,
+        y,
+        param_penalty_weight=0.1,
+        fit_params=True,
+        random_seed=0,
+        FAILED_PROGRAM_COST=jnp.inf,
+        tol=1e-2,
+        max_iter=1_000,
+        use_param_estimator=True,
+    ):
         # Upstream runs the estimator, all validity checks and the initial scores; no fitting.
-        result = upstream_objective(neuron_model, param_estimator, loss_func, x, y,
-                                    param_penalty_weight=param_penalty_weight, fit_params=fit_params,
-                                    random_seed=random_seed, FAILED_PROGRAM_COST=FAILED_PROGRAM_COST,
-                                    tol=tol, max_iter=0, use_param_estimator=use_param_estimator)
+        result = upstream_objective(
+            neuron_model,
+            param_estimator,
+            loss_func,
+            x,
+            y,
+            param_penalty_weight=param_penalty_weight,
+            fit_params=fit_params,
+            random_seed=random_seed,
+            FAILED_PROGRAM_COST=FAILED_PROGRAM_COST,
+            tol=tol,
+            max_iter=0,
+            use_param_estimator=use_param_estimator,
+        )
         initial_loss, initial_params, unfitted_loss, params = result
         if not fit_params or params.shape[1] == 0 or unfitted_loss == FAILED_PROGRAM_COST:
             return result
 
         # The same trial split as upstream's objective.
         order = jax.random.permutation(jax.random.PRNGKey(random_seed), jnp.arange(y.shape[1]))
-        train, test = order[:y.shape[1] // 2], order[y.shape[1] // 2:]
+        train, test = order[: y.shape[1] // 2], order[y.shape[1] // 2 :]
         x_train, y_train, x_test, y_test = x[:, train], y[:, train], x[:, test], y[:, test]
 
         if fitter == "lm" and loss_func.__name__ == "quadratic_loss":
@@ -70,8 +91,11 @@ def make_objective(upstream_objective, fitter, lm_iterations=LM_ITERATIONS):
 
         per_cell = _per_cell_loss(neuron_model, loss_func)
         final = jnp.nanmean(per_cell(fitted, x_test, y_test)) + param_penalty_weight * fitted.shape[1]
-        final = float(jnp.nan_to_num(final, nan=FAILED_PROGRAM_COST, posinf=FAILED_PROGRAM_COST,
-                                     neginf=FAILED_PROGRAM_COST))
+        final = float(
+            jnp.nan_to_num(
+                final, nan=FAILED_PROGRAM_COST, posinf=FAILED_PROGRAM_COST, neginf=FAILED_PROGRAM_COST
+            )
+        )
         return initial_loss, initial_params, final, fitted
 
     return objective
@@ -100,7 +124,10 @@ def fit_adam(model, loss_func, params, x, y, max_iter, learning_rate=3e-3):
 
     (params, x, y), mask, n_cells = _shard(params, x, y)
     per_cell = _per_cell_loss(model, loss_func)
-    loss = lambda p: jnp.sum(per_cell(p, x, y) * mask) / n_cells
+
+    def loss(p):
+        return jnp.sum(per_cell(p, x, y) * mask) / n_cells
+
     value_and_grad = jax.value_and_grad(loss)
     opt = optax.adam(learning_rate, b1=0.9, b2=0.999, eps=1e-8)
 
@@ -113,9 +140,16 @@ def fit_adam(model, loss_func, params, x, y, max_iter, learning_rate=3e-3):
         value, grad = value_and_grad(p)
         updates, opt_state = opt.update(grad, opt_state, p)
         p = optax.apply_updates(p, updates)
-        stop = ~jnp.isfinite(value) | ~jnp.all(jnp.isfinite(p))
+        stop = ~jnp.isfinite(value) | ~jnp.all(jnp.isfinite(p))  # ty: ignore[invalid-argument-type]
         better = ~stop & (value < best_loss)
-        return (step + 1, p, opt_state, jnp.where(better, value, best_loss), jnp.where(better, p, best_p), stop)
+        return (
+            step + 1,
+            p,
+            opt_state,
+            jnp.where(better, value, best_loss),
+            jnp.where(better, p, best_p),  # ty: ignore[no-matching-overload]
+            stop,
+        )
 
     @jax.jit
     def run(p):
@@ -152,9 +186,11 @@ def fit_lm(model, params, x, y, iterations=LM_ITERATIONS):
         candidate = p + jnp.where(jnp.isfinite(step), step, 0.0)
         new_cost = cost(candidate)
         accept = new_cost < c
-        return (jnp.where(accept[:, None], candidate, p),
-                jnp.clip(jnp.where(accept, damping / 3, damping * 4), 1e-7, 1e7),
-                jnp.where(accept, new_cost, c))
+        return (
+            jnp.where(accept[:, None], candidate, p),
+            jnp.clip(jnp.where(accept, damping / 3, damping * 4), 1e-7, 1e7),
+            jnp.where(accept, new_cost, c),
+        )
 
     @jax.jit
     def run(p):
@@ -168,12 +204,14 @@ def benchmark_report(rows):
     """Format benchmark rows as a Markdown table."""
     lines = ["| Program | Fitter | Seconds | Train loss | Score |", "| --- | --- | ---: | ---: | ---: |"]
     for row in rows:
-        lines.append(f"| {row['program']} | {row['fitter']} | {row['seconds']:.1f} | "
-                     f"{row['train_loss']:.4f} | {row['score']:.4f} |")
+        lines.append(
+            f"| {row['program']} | {row['fitter']} | {row['seconds']:.1f} | "
+            f"{row['train_loss']:.4f} | {row['score']:.4f} |"
+        )
     return "\n".join(lines)
 
 
 def train_loss(model, loss_func, params, x, y, random_seed=0):
     order = np.asarray(jax.random.permutation(jax.random.PRNGKey(random_seed), jnp.arange(y.shape[1])))
-    train = order[:y.shape[1] // 2]
+    train = order[: y.shape[1] // 2]
     return float(jnp.nanmean(_per_cell_loss(model, loss_func)(params, x[:, train], y[:, train])))

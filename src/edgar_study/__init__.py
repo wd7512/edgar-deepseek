@@ -8,5 +8,6 @@ host devices: arrays still default to the first device, and GPU hosts are unaffe
 import os
 
 if "xla_force_host_platform_device_count" not in os.environ.get("XLA_FLAGS", ""):
-    os.environ["XLA_FLAGS"] = (os.environ.get("XLA_FLAGS", "")
-                               + f" --xla_force_host_platform_device_count={os.cpu_count()}").strip()
+    os.environ["XLA_FLAGS"] = (
+        os.environ.get("XLA_FLAGS", "") + f" --xla_force_host_platform_device_count={os.cpu_count()}"
+    ).strip()

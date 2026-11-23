@@ -3,9 +3,9 @@
 import argparse
 import json
 import os
-from pathlib import Path
 import sys
 import tempfile
+from pathlib import Path
 
 from edgar_study.datasets import (
     ACTIVITY_THRESHOLD,
@@ -16,7 +16,6 @@ from edgar_study.datasets import (
     prepare,
     synthetic_recording,
 )
-
 from edgar_study.upstream import MSE_SCALE, PENALTY, UPSTREAM_COMMIT, import_upstream
 
 
@@ -49,12 +48,20 @@ def run_baseline(args):
             # EDGAR samples cells for JAX compatibility checks using NumPy's RNG.
             np.random.seed(0)
             initial_score, _, score, params = objective(
-                model, estimator, quadratic_loss, x[rows], y[rows],
-                random_seed=TRIAL_SEED, max_iter=1000, tol=1e-6,
+                model,
+                estimator,
+                quadratic_loss,
+                x[rows],
+                y[rows],
+                random_seed=TRIAL_SEED,
+                max_iter=1000,
+                tol=1e-6,
                 param_penalty_weight=PENALTY,
             )
             columns = indices["score_trial_columns"]
-            predictions = jax.vmap(lambda stimuli, p: model(stimuli, *p))(x[rows][:, columns], params)
+            predictions = jax.vmap(lambda stimuli, p, model=model: model(stimuli, *p))(
+                x[rows][:, columns], params
+            )
             mse = float(jnp.mean(jnp.square(predictions - y[rows][:, columns])))
             count = params.shape[1]
             if not np.isfinite([initial_score, score, mse]).all():
@@ -62,7 +69,10 @@ def run_baseline(args):
             if not np.isclose(score, MSE_SCALE * mse + PENALTY * count, rtol=1e-6, atol=1e-6):
                 raise ValueError(f"Upstream score differs from the recorded MSE for {partition}/{label}.")
             metrics[partition][label] = {
-                "initial_score": initial_score, "score": score, "mse": mse, "parameters": count,
+                "initial_score": initial_score,
+                "score": score,
+                "mse": mse,
+                "parameters": count,
             }
 
     manifest = {
@@ -107,59 +117,93 @@ def main():
     upstream = argparse.ArgumentParser(add_help=False)
     upstream.add_argument("--upstream", type=Path, default=Path("."))
     fitter = argparse.ArgumentParser(add_help=False)
-    fitter.add_argument("--fitter", choices=("auto", "upstream", "adam", "lm"), default=None,
-                        help="Per-cell parameter fitting. auto (run default): compiled Adam split across "
-                             "CPU cores when JAX has only a CPU, upstream's loop otherwise. lm is "
-                             "Levenberg-Marquardt, faster but scores differently. rescore defaults to "
-                             "the run's own fitter.")
+    fitter.add_argument(
+        "--fitter",
+        choices=("auto", "upstream", "adam", "lm"),
+        default=None,
+        help="Per-cell parameter fitting. auto (run default): compiled Adam split across "
+        "CPU cores when JAX has only a CPU, upstream's loop otherwise. lm is "
+        "Levenberg-Marquardt, faster but scores differently. rescore defaults to "
+        "the run's own fitter.",
+    )
     dataset = argparse.ArgumentParser(add_help=False)
     dataset.add_argument("--dataset", type=Path, required=True)
     models = argparse.ArgumentParser(add_help=False)
     models.add_argument("--model", default="hy4-flash-free", help="Translator, proposer and estimator model.")
-    models.add_argument("--image-model", default=None,
-                        help="Optional vision model that describes diagnostic images for --model.")
-    models.add_argument("--allow-paid", action="store_true",
-                        help="Permit models with a nonzero price (spend cap still applies).")
+    models.add_argument(
+        "--image-model",
+        default=None,
+        help="Optional vision model that describes diagnostic images for --model.",
+    )
+    models.add_argument(
+        "--allow-paid",
+        action="store_true",
+        help="Permit models with a nonzero price (spend cap still applies).",
+    )
     models.add_argument("--results", type=Path, default=Path("results"))
     models.add_argument("--max-tokens", type=int, default=32_000)
-    models.add_argument("--reasoning-effort", default="none",
-                        help="Effort for translator, routine proposals and estimators "
-                             "(upstream's non-thinking Gemini 2.0 tiers).")
+    models.add_argument(
+        "--reasoning-effort",
+        default="none",
+        help="Effort for translator, routine proposals and estimators "
+        "(upstream's non-thinking Gemini 2.0 tiers).",
+    )
 
-    baseline = commands.add_parser("baseline", parents=[upstream], help="Fit and score the two Gaussian seeds.")
+    baseline = commands.add_parser(
+        "baseline", parents=[upstream], help="Fit and score the two Gaussian seeds."
+    )
     source = baseline.add_mutually_exclusive_group(required=True)
     source.add_argument("--dataset", type=Path)
     source.add_argument("--synthetic", action="store_true")
     baseline.add_argument("--output", type=Path, required=True)
-    baseline.add_argument("--protocol", choices=("paper-fidelity", "strict-holdout-v1"),
-                          default="strict-holdout-v1")
+    baseline.add_argument(
+        "--protocol", choices=("paper-fidelity", "strict-holdout-v1"), default="strict-holdout-v1"
+    )
     baseline.set_defaults(func=run_baseline)
 
-    preflight = commands.add_parser("preflight", parents=[models],
-                                    help="Check model availability, text and image calls.")
+    preflight = commands.add_parser(
+        "preflight", parents=[models], help="Check model availability, text and image calls."
+    )
     preflight.set_defaults(func=lambda args: _load("preflight", "preflight")(args))
 
-    run = commands.add_parser("run", parents=[models, dataset, upstream, fitter],
-                              help="Run the upstream EDGAR search with OpenCode Go models.")
+    run = commands.add_parser(
+        "run",
+        parents=[models, dataset, upstream, fitter],
+        help="Run the upstream EDGAR search with OpenCode Go models.",
+    )
     run.add_argument("--iterations", type=int, default=12)
     run.add_argument("--time-limit", type=float, default=600, help="Minutes.")
-    run.add_argument("--large-model", default=None,
-                     help="Model for every third generation (upstream's thinking tier). "
-                          "Defaults to --model with --large-reasoning-effort.")
+    run.add_argument(
+        "--large-model",
+        default=None,
+        help="Model for every third generation (upstream's thinking tier). "
+        "Defaults to --model with --large-reasoning-effort.",
+    )
     run.add_argument("--large-reasoning-effort", default="high")
-    run.add_argument("--temperature-scale", type=float, default=0.5,
-                     help="Multiplies upstream's temperatures, which run from 1 to 2.")
+    run.add_argument(
+        "--temperature-scale",
+        type=float,
+        default=0.5,
+        help="Multiplies upstream's temperatures, which run from 1 to 2.",
+    )
     run.add_argument("--concurrency", type=int, default=16)
     run.add_argument("--no-images", action="store_true", help="Text-only feedback condition.")
     run.add_argument("--islands", type=int, default=8)
     run.add_argument("--batch-size", type=int, default=6, help="Proposals per island per generation.")
-    run.add_argument("--cell-fraction", type=float, default=1.0,
-                     help="Search on this random fraction of the discovery cells only (rescore still "
-                          "uses the full selection and locked-test cells).")
+    run.add_argument(
+        "--cell-fraction",
+        type=float,
+        default=1.0,
+        help="Search on this random fraction of the discovery cells only (rescore still "
+        "uses the full selection and locked-test cells).",
+    )
     run.set_defaults(func=lambda args: _load("engine", "run")(args))
 
-    rescore = commands.add_parser("rescore", parents=[dataset, upstream, fitter],
-                                  help="Select on validation cells, score once on locked cells.")
+    rescore = commands.add_parser(
+        "rescore",
+        parents=[dataset, upstream, fitter],
+        help="Select on validation cells, score once on locked cells.",
+    )
     rescore.add_argument("--run", type=Path, required=True)
     rescore.add_argument("--top", type=int, default=10)
     rescore.set_defaults(func=lambda args: _load("rescore", "rescore")(args))
@@ -175,6 +219,7 @@ def main():
 def _load(module, name):
     """Import subcommands lazily so the offline baseline needs no network client."""
     import importlib
+
     return getattr(importlib.import_module(f"edgar_study.{module}"), name)
 
 
