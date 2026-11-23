@@ -100,3 +100,42 @@ def test_bounded_lm_escapes_a_poor_start_as_adam_does():
 
 def test_auto_uses_the_bounded_lm_fitter():
     assert fitting.resolve("auto") == "lm-bounded"
+
+
+def _cosine(theta, phi, a):
+    import jax.numpy as jnp
+
+    return jnp.abs(a) * jnp.cos(theta - phi)
+
+
+def _cosine_cells():
+    theta = np.tile(np.linspace(0, 2 * np.pi, 72, endpoint=False, dtype=np.float32), (6, 1))
+    y = np.cos(theta).astype(np.float32)
+    start = np.tile(np.array([np.pi, 1.0], dtype=np.float32), (6, 1))
+    return theta, y, start
+
+
+def _squared_error(params, theta, y):
+    return np.sum((np.asarray(_cosine(theta, params[:, :1], params[:, 1:])) - y) ** 2, axis=1)
+
+
+def test_multistart_escapes_a_start_where_a_single_fit_cannot_move():
+    theta, y, start = _cosine_cells()
+
+    single = fitting.fit_lm_bounded(_cosine, start, theta, y).params
+    multi = fitting.fit_multistart(_cosine, start, theta, y, starts=8, seed=0)
+
+    assert np.all(_squared_error(multi.params, theta, y) < 1e-3)
+    assert np.all(_squared_error(single, theta, y) > 30)
+    assert multi.params.shape == start.shape
+
+
+def test_multistart_never_ends_worse_than_its_first_start():
+    theta, y, start = _cosine_cells()
+    start = start + np.float32(0.3) * np.arange(6, dtype=np.float32)[:, None] * np.array([1, 0], np.float32)
+
+    single = fitting.fit_lm_bounded(_cosine, start, theta, y).params
+    multi = fitting.fit_multistart(_cosine, start, theta, y, starts=3, seed=1)
+
+    assert np.all(_squared_error(multi.params, theta, y) <= _squared_error(single, theta, y) + 1e-5)
+    assert multi.best_start.shape == (6,)
