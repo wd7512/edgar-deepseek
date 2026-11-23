@@ -61,7 +61,7 @@ scores best.
 - [x] MLX: GPU LM and Adam
 - [x] Collect results into tables, write summary and recommendation
 - [x] `uv run gate` and `uv run check`, `changes/` fragment, commit, push
-- [ ] Open the pull request (needs a GitHub token; no `gh` allowed here)
+- [x] Open the pull request: [#8](https://github.com/wd7512/edgar-deepseek/pull/8)
 
 ## Experiment matrix
 
