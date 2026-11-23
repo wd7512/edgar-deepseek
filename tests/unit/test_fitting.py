@@ -96,3 +96,7 @@ def test_bounded_lm_escapes_a_poor_start_as_adam_does():
         return fitting.train_loss(model, loss, params, x, y)
 
     assert train("lm-bounded") <= train("adam")
+
+
+def test_auto_uses_the_bounded_lm_fitter():
+    assert fitting.resolve("auto") == "lm-bounded"

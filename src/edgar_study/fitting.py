@@ -1,4 +1,4 @@
-"""Faster per-cell parameter fitting for upstream's `objective`, chosen by backend.
+"""Faster per-cell parameter fitting for upstream's `objective`.
 
 Upstream fits each program with 1,000 Adam steps driven from a Python loop, syncing with the
 host after every step. That is reasonable on a GPU but slow on CPU. This module keeps
@@ -13,15 +13,17 @@ upstream's checks, data split and scoring by calling upstream's own `objective` 
               iteration and stops each cell once an accepted step lowers its cost by less than
               `LM_BOUNDED_TOLERANCE` (relative), or after `lm_iterations`. Unbounded steps can throw a
               parameter past a program's clip, where its gradient is zero and it stays stuck; the
-              bound keeps fits near the path Adam takes, so it matches Adam's fits in far less time.
+              bound keeps fits near the path Adam takes. A step that hits the bound raises the
+              damping, so ill-conditioned starts turn towards scaled gradient descent.
 
 Both fitters split the cells across every JAX device. On a CPU, `edgar_study/__init__.py` exposes
 one device per core before JAX starts, because XLA otherwise runs this elementwise work on about
 one thread.
 
-`auto` picks `adam` when JAX only has a CPU and `upstream` otherwise. `lm` and `lm-bounded` fit
-each cell to convergence instead of upstream's fixed 1,000 steps, which changes scores slightly, so
-they are opt-in.
+`auto` picks `lm-bounded`: about 8× faster than upstream's loop over the paper's curves and
+upstream's seeds, with scores within 0.7% (see `scripts/fit_timings/results.md`). It fits each cell
+to a tolerance instead of upstream's fixed 1,000 steps, so scores are not identical; pass
+`upstream` or `adam` to reproduce upstream's scores.
 """
 
 import functools
@@ -49,9 +51,7 @@ class BoundedFit(NamedTuple):
 
 
 def resolve(fitter):
-    if fitter == "auto":
-        return "adam" if jax.default_backend() == "cpu" else "upstream"
-    return fitter
+    return "lm-bounded" if fitter == "auto" else fitter
 
 
 def install(hypothesis_engine, fitter, lm_iterations=LM_ITERATIONS):
