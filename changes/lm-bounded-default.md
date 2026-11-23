@@ -1,0 +1,1 @@
+Made `lm-bounded` the default fitter (`--fitter auto`): about 8× faster than upstream's loop over the paper's ten curves and upstream's four seeds, with scores within 0.7%. Pass `--fitter upstream` or `adam` to reproduce upstream's scores.

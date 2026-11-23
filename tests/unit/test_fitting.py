@@ -79,3 +79,24 @@ def test_bounded_lm_caps_each_parameter_move_per_iteration():
 def test_unknown_fitter_is_rejected():
     with pytest.raises(ValueError, match="no-such-fitter"):
         fitting.make_objective(lambda *a, **k: None, "no-such-fitter")
+
+
+def test_bounded_lm_escapes_a_poor_start_as_adam_does():
+    upstream = import_upstream(Path(".").resolve())
+    engine, seeds = upstream["hypothesis_engine"], upstream["seed_programs"]
+    loss = upstream["loss_functions"].quadratic_loss
+    model, estimator = seeds.neuron_model_4_jax, seeds.parameter_estimator_4
+    x, y = curves.synthetic_cells(32, 428)
+
+    def train(fitter):
+        np.random.seed(0)
+        _, _, _, params = fitting.make_objective(engine.objective, fitter)(
+            model, estimator, loss, x, y, param_penalty_weight=PENALTY, max_iter=1000
+        )
+        return fitting.train_loss(model, loss, params, x, y)
+
+    assert train("lm-bounded") <= train("adam")
+
+
+def test_auto_uses_the_bounded_lm_fitter():
+    assert fitting.resolve("auto") == "lm-bounded"

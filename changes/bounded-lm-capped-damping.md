@@ -1,0 +1,1 @@
+Fixed `lm-bounded` stalling when a capped step keeps being accepted: it now raises damping instead of lowering it, so upstream's double-von-Mises seed fits better than with Adam instead of far worse. The timing script can now time upstream's seed programs and the real recording's discovery cells.

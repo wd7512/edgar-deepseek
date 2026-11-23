@@ -74,15 +74,15 @@ Each run directory holds:
 
 ### Fitting speed
 
-Nearly all run time is per-cell curve fitting: 1,000 Adam steps over 1,055 cells for every program. `--fitter` picks how it runs:
+Nearly all run time is per-cell curve fitting over 1,055 cells for every program. `--fitter` picks how it runs:
 
 | `--fitter` | What it does | When |
 | --- | --- | --- |
-| `auto` (default) | `adam` if JAX has only a CPU, otherwise `upstream` | always safe |
-| `upstream` | upstream's Python loop, unchanged | GPU hosts, exact reproduction |
-| `adam` | the same Adam schedule compiled into one XLA loop, cells split across CPU cores (same scores to about 1e-4) | CPU hosts |
-| `lm` | Levenberg–Marquardt to convergence: much faster for small models, but scores differently | experiments only |
-| `lm-bounded` | Levenberg–Marquardt with each parameter's step capped at 0.25, stopping each cell at a 1e-4 relative tolerance (at most 100 iterations): lower training loss than Adam and scores within about 1%, many times faster | fast searches |
+| `auto` (default) | `lm-bounded` | always |
+| `lm-bounded` | Levenberg–Marquardt with each parameter's step capped at 0.25, stopping each cell at a 1e-4 relative tolerance (at most 100 iterations). About 8× faster than `upstream` over the paper's curves and upstream's seeds, scores within 0.7% | default |
+| `upstream` | upstream's Python loop, unchanged: 1,000 Adam steps | exact reproduction |
+| `adam` | the same Adam steps compiled into one XLA loop, cells split across CPU cores (same scores to about 1e-4, about 1.9× faster) | reproduction on CPU |
+| `lm` | Levenberg–Marquardt without the step cap: can strand parameters past a program's clips | experiments only |
 
 `src/edgar_study/__init__.py` exposes one XLA CPU device per core so cells can be split across cores. `rescore` uses the run's own fitter unless `--fitter` is given.
 
