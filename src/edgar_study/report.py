@@ -18,12 +18,18 @@ BLUE, LIGHT_BLUE = "#2a78d6", "#86b6ef"
 def _census(run_dir):
     # Prefer the final census; fall back to the latest per-generation one while a run is in progress.
     final = combined_file(run_dir, "census.npy")
-    found = [final] if final else sorted(
-        run_dir.glob("program_databases/*/*/iteration_updates/iteration_*/census.npy"),
-        key=lambda path: int(path.parent.name.split("_")[1]))
+    found = (
+        [final]
+        if final
+        else sorted(
+            run_dir.glob("program_databases/*/*/iteration_updates/iteration_*/census.npy"),
+            key=lambda path: int(path.parent.name.split("_")[1]),
+        )
+    )
     if not found:
         raise SystemExit(f"No census.npy under {run_dir}.")
     import numpy as np
+
     return np.load(found[-1], allow_pickle=True)
 
 
@@ -78,25 +84,39 @@ def report(args):
     per_generation = []
     for generation in range(generations):
         scored = loss[(index // per_generation_count) == generation]
-        per_generation.append({"generation": generation, "scored": int(scored.size),
-                               "failed": per_generation_count - int(scored.size),
-                               "best": float(scored.min()) if scored.size else None,
-                               "best_so_far": float(best[(generation + 1) * per_generation_count - 1])})
+        per_generation.append(
+            {
+                "generation": generation,
+                "scored": int(scored.size),
+                "failed": per_generation_count - int(scored.size),
+                "best": float(scored.min()) if scored.size else None,
+                "best_so_far": float(best[(generation + 1) * per_generation_count - 1]),
+            }
+        )
 
     result = {
-        "run_id": manifest["run_id"], "models": manifest["models"], "status": manifest.get("status"),
+        "run_id": manifest["run_id"],
+        "models": manifest["models"],
+        "status": manifest.get("status"),
         "wall_hours": round((manifest.get("finished", manifest["started"]) - manifest["started"]) / 3600, 2),
-        "generations": generations, "proposals_attempted": attempted, "programs_scored": int(loss.size),
-        "seed_losses": seeds, "best_discovery_loss": float(loss.min()) if loss.size else None,
+        "generations": generations,
+        "proposals_attempted": attempted,
+        "programs_scored": int(loss.size),
+        "seed_losses": seeds,
+        "best_discovery_loss": float(loss.min()) if loss.size else None,
         "improvement_over_double_gaussian": seeds[1] - float(loss.min()) if loss.size else None,
         "per_generation": per_generation,
-        "requests": {role: {"count": len(rows),
-                            "ok": sum(r["status"] == 200 and r["content_chars"] > 0 for r in rows),
-                            "truncated": sum(r.get("finish_reason") == "length" for r in rows),
-                            "median_latency_s": statistics.median(r["latency_s"] for r in rows),
-                            "output_tokens": sum(r["usage"].get("completion_tokens") or 0 for r in rows),
-                            "input_tokens": sum(r["usage"].get("prompt_tokens") or 0 for r in rows)}
-                     for role, rows in by_role.items()},
+        "requests": {
+            role: {
+                "count": len(rows),
+                "ok": sum(r["status"] == 200 and r["content_chars"] > 0 for r in rows),
+                "truncated": sum(r.get("finish_reason") == "length" for r in rows),
+                "median_latency_s": statistics.median(r["latency_s"] for r in rows),
+                "output_tokens": sum(r["usage"].get("completion_tokens") or 0 for r in rows),
+                "input_tokens": sum(r["usage"].get("prompt_tokens") or 0 for r in rows),
+            }
+            for role, rows in by_role.items()
+        },
         "list_cost_usd": sum(list_cost(c["usage"]) for c in calls),
         "scored_programs_with_fitted_exponent": len(exponent_generations),
         "first_generation_with_fitted_exponent": first_exponent_generation,
@@ -109,6 +129,7 @@ def report(args):
 
 def _plot(path, index, loss, best, seeds, manifest, per_generation_count):
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -117,18 +138,31 @@ def _plot(path, index, loss, best, seeds, manifest, per_generation_count):
     double = seeds[1]
     visible = loss < double + 5  # very poor programs would squash the interesting range
     hidden = int((~visible).sum())
-    axis.scatter(index[visible], loss[visible], s=14, color=LIGHT_BLUE, edgecolor="none",
-                 label="Each scored program" + (f" ({hidden} above {double + 5:.0f} not shown)" if hidden else ""),
-                 zorder=2)
+    axis.scatter(
+        index[visible],
+        loss[visible],
+        s=14,
+        color=LIGHT_BLUE,
+        edgecolor="none",
+        label="Each scored program" + (f" ({hidden} above {double + 5:.0f} not shown)" if hidden else ""),
+        zorder=2,
+    )
     axis.step(range(len(best)), best, where="post", color=BLUE, linewidth=2, label="Best so far", zorder=3)
-    axis.axhline(double, color=MUTED, linewidth=1, linestyle=(0, (4, 3)), zorder=1,
-                 label=f"Double Gaussian seed ({double:.2f})")
+    axis.axhline(
+        double,
+        color=MUTED,
+        linewidth=1,
+        linestyle=(0, (4, 3)),
+        zorder=1,
+        label=f"Double Gaussian seed ({double:.2f})",
+    )
     for generation in range(1, len(best) // per_generation_count):
         axis.axvline(generation * per_generation_count, color="#e6e5e0", linewidth=0.8, zorder=0)
     axis.set_xlabel("Proposals attempted (failed proposals included)", color=TEXT)
     axis.set_ylabel(f"Discovery loss ({MSE_SCALE}·MSE + {PENALTY}·params, lower is better)", color=TEXT)
-    axis.set_title(f"EDGAR on {manifest['models']['proposer']}: best discovery loss", color=TEXT,
-                   loc="left", fontsize=11)
+    axis.set_title(
+        f"EDGAR on {manifest['models']['proposer']}: best discovery loss", color=TEXT, loc="left", fontsize=11
+    )
     for side in ("top", "right"):
         axis.spines[side].set_visible(False)
     for side in ("left", "bottom"):

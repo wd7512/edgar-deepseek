@@ -1,12 +1,12 @@
 # EDGAR × OpenCode Go
 
-This fork runs [EDGAR](https://github.com/reillytilbury/EDGAR)'s published equation-discovery loop unchanged, with OpenCode Go models in place of Gemini. The upstream modules stay byte-identical to commit `0943922`; `edgar_study/` swaps only the LLM call layer at runtime.
+This fork runs [EDGAR](https://github.com/reillytilbury/EDGAR)'s published equation-discovery loop unchanged, with OpenCode Go models in place of Gemini. The upstream modules stay byte-identical to commit `0943922`; `src/edgar_study/` swaps only the LLM call layer at runtime.
 
 - [docs/PHASE_0.md](docs/PHASE_0.md): the like-for-like replication, its protocol, and results.
 - [docs/ROADMAP.md](docs/ROADMAP.md): Phase 1 (agentic harness) and Phase 2 (custom harness) ideas.
 - [METHOD_DIFFS.md](METHOD_DIFFS.md): every known difference from the paper and from upstream.
 
-Use [uv](https://docs.astral.sh/uv/) with Python 3.12. The upstream `requirements.txt` is kept for reference only; `pyproject.toml` and `uv.lock` are authoritative.
+Use [uv](https://docs.astral.sh/uv/) with Python 3.12. `pyproject.toml` and `uv.lock` are authoritative. The upstream notebooks, tests and `requirements.txt` live at [commit `0943922`](https://github.com/reillytilbury/EDGAR/tree/0943922dcb73b12dbee8e440b3e1ff700cb49c10).
 
 ## Setup
 
@@ -29,7 +29,7 @@ Store the OpenCode Go key in a file outside the repository and point `OPENCODE_A
 Fits the single- and double-Gaussian seeds with the upstream JAX evaluator. Needs no key.
 
 ```bash
-JAX_PLATFORMS=cpu uv run --locked python -m edgar_study.cli baseline \
+JAX_PLATFORMS=cpu uv run edgar baseline \
   --dataset data/gratings_drifting_GT1_2019_04_12_1.npy --output results/dataset1
 ```
 
@@ -43,24 +43,24 @@ JAX_PLATFORMS=cpu uv run --locked python -m edgar_study.cli baseline \
 ## Search runs
 
 ```bash
-uv run --locked python -m edgar_study.cli preflight --model hy4-flash-free
+uv run edgar preflight --model hy4-flash-free
 ```
 
 ```bash
-JAX_PLATFORMS=cpu uv run --locked python -m edgar_study.cli run --model hy4-flash-free \
+JAX_PLATFORMS=cpu uv run edgar run --model hy4-flash-free \
   --dataset data/gratings_drifting_GT1_2019_04_12_1.npy --iterations 12
 ```
 
 For a run under 30 minutes on 4 CPU cores, search on a quarter of the discovery cells with a smaller search. `rescore` still tests on the full selection and locked-test cells:
 
 ```bash
-JAX_PLATFORMS=cpu uv run --locked python -m edgar_study.cli run --model hy4-flash-free \
+JAX_PLATFORMS=cpu uv run edgar run --model hy4-flash-free \
   --dataset data/gratings_drifting_GT1_2019_04_12_1.npy \
   --iterations 2 --islands 4 --batch-size 6 --cell-fraction 0.25
 ```
 
 ```bash
-JAX_PLATFORMS=cpu uv run --locked python -m edgar_study.cli rescore \
+JAX_PLATFORMS=cpu uv run edgar rescore \
   --run results/runs/<run-id> --dataset data/gratings_drifting_GT1_2019_04_12_1.npy
 ```
 
@@ -83,7 +83,7 @@ Nearly all run time is per-cell curve fitting: 1,000 Adam steps over 1,055 cells
 | `adam` | the same Adam schedule compiled into one XLA loop, cells split across CPU cores (same scores to about 1e-4) | CPU hosts |
 | `lm` | Levenberg–Marquardt to convergence: much faster for small models, but scores differently | experiments only |
 
-`edgar_study/__init__.py` exposes one XLA CPU device per core so cells can be split across cores. `rescore` uses the run's own fitter unless `--fitter` is given.
+`src/edgar_study/__init__.py` exposes one XLA CPU device per core so cells can be split across cores. `rescore` uses the run's own fitter unless `--fitter` is given.
 
 ### Spending safeguards
 
@@ -93,21 +93,23 @@ Nearly all run time is per-cell curve fitting: 1,000 Adam steps over 1,055 cells
 The paid run is the same command with the models swapped. DeepSeek V4.1 Flash has no `none` reasoning effort, so use `low` for its routine tiers:
 
 ```bash
-JAX_PLATFORMS=cpu uv run --locked python -m edgar_study.cli run --allow-paid \
+JAX_PLATFORMS=cpu uv run edgar run --allow-paid \
   --model deepseek-v4.1-flash --reasoning-effort low --image-model muse-spark-1.3-contributor \
   --dataset data/gratings_drifting_GT1_2019_04_12_1.npy --iterations 12
 ```
 
-## Tests
+## Development
+
+Tests, lint, types and repository hygiene run through [wills-agentic-tools](https://github.com/wd7512/wills-agentic-tools), pinned in `pyproject.toml`. CI runs the same two commands.
 
 ```bash
-uv run --locked python tests.py
+uv run gate
 ```
 
 ```bash
-uv run --locked python -m edgar_study.test_go_client
+uv run check
 ```
 
-```bash
-JAX_PLATFORMS=cpu uv run --locked python -m edgar_study.test_fitting
-```
+`gate` runs format, lint, type check, tests and the lock check. `check` enforces the mirrored test layout (`src/edgar_study/x.py` needs `tests/unit/test_x.py`), file-name portability, secrets, untracked paths and a `changes/` fragment per branch. The six upstream modules at the repo root are excluded from format and lint because they must stay byte-identical.
+
+Coding agents: see [AGENTS.md](AGENTS.md). `uv run delegate` starts a worker in its own worktree using the `[tool.devtools.delegate]` settings in `pyproject.toml`.

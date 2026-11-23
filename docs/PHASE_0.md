@@ -117,11 +117,7 @@ A full-size search cannot finish in 30 minutes on 4 CPU cores. So the fast run s
 - **Fitting:** the compiled, core-sharded Adam (`--fitter auto`), with upstream's 1,000 and 2,000 step budgets unchanged.
 - **Test:** `rescore` on the full 527 selection and 528 locked cells, exactly as for the other runs.
 
-```bash
-JAX_PLATFORMS=cpu uv run --locked python -m edgar_study.cli run --model hy4-flash-free \
-  --dataset data/gratings_drifting_GT1_2019_04_12_1.npy \
-  --iterations 2 --islands 4 --batch-size 6 --cell-fraction 0.25
-```
+Command: the fast-search example in the [README](../README.md#search-runs).
 
 Artifacts are in [artifacts/fast](artifacts/fast).
 

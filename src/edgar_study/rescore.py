@@ -7,6 +7,7 @@ seeds are always scored as references. Settings match upstream's final evaluatio
 
 import inspect
 import json
+from typing import Any
 
 from edgar_study import fitting
 from edgar_study.upstream import code_key, combined_file, import_upstream, score_program
@@ -41,31 +42,48 @@ def rescore(args):
             translations[row["numpy_sha256"]] = row["jax_code"]
 
     frame = pd.read_csv(database).sort_values("train_loss").drop_duplicates("program_code_string")
-    candidates = [{"id": f"seed_{k}", "iteration": -1,
-                   "model": getattr(seeds, f"neuron_model_{k}_jax"),
-                   "estimator": getattr(seeds, f"parameter_estimator_{k}")} for k in (1, 2)]
+    candidates: list[dict[str, Any]] = [
+        {
+            "id": f"seed_{k}",
+            "iteration": -1,
+            "model": getattr(seeds, f"neuron_model_{k}_jax"),
+            "estimator": getattr(seeds, f"parameter_estimator_{k}"),
+        }
+        for k in (1, 2)
+    ]
     for _, row in frame[frame["iteration_number"] >= 0].head(args.top).iterrows():
         jax_code = translations.get(code_key(row["program_code_string"]))
-        candidates.append({
-            "id": f"{row['iteration_number']}_{row['birth_island']}_{row['batch_index']}",
-            "iteration": int(row["iteration_number"]), "discovery_loss": float(row["train_loss"]),
-            "upstream_eval_loss": float(row["test_loss"]),
-            "model": utils.str_to_func(jax_code, "neuron_model"),
-            "estimator": utils.str_to_func(row["parameter_estimator_code_string"], "parameter_estimator"),
-            "code": row["program_code_string"], "jax_code": jax_code,
-        })
+        candidates.append(
+            {
+                "id": f"{row['iteration_number']}_{row['birth_island']}_{row['batch_index']}",
+                "iteration": int(row["iteration_number"]),
+                "discovery_loss": float(row["train_loss"]),
+                "upstream_eval_loss": float(row["test_loss"]),
+                "model": utils.str_to_func(jax_code, "neuron_model"),
+                "estimator": utils.str_to_func(row["parameter_estimator_code_string"], "parameter_estimator"),
+                "code": row["program_code_string"],
+                "jax_code": jax_code,
+            }
+        )
 
     def score(candidate, cells):
         if candidate["model"] is None or candidate["estimator"] is None:
             return None
-        total, mse, count, params = score_program(upstream, candidate["model"], candidate["estimator"],
-                                                  x[cells], y[cells], MAX_ITER)
+        total, mse, count, params = score_program(
+            upstream, candidate["model"], candidate["estimator"], x[cells], y[cells], MAX_ITER
+        )
         if not np.isfinite(total):
             return None
         names = [n for n in inspect.signature(candidate["model"]).parameters if n != "theta"]
         medians = np.median(np.asarray(params), axis=0).tolist()
-        return {"score": total, "mse": mse, "parameters": count,
-                "median_fitted_params": dict(zip(names, medians)) if len(names) == count else medians}
+        return {
+            "score": total,
+            "mse": mse,
+            "parameters": count,
+            "median_fitted_params": dict(zip(names, medians, strict=True))
+            if len(names) == count
+            else medians,
+        }
 
     for candidate in candidates:
         candidate["selection"] = score(candidate, groups["selection"])
@@ -83,12 +101,16 @@ def rescore(args):
     result = {
         "fitter": fitter,
         "selection_rule": "lowest selection-cell penalized score among the top "
-                          f"{args.top} unique learned programs by discovery loss",
+        f"{args.top} unique learned programs by discovery loss",
         "cell_counts": {name: int(len(cells)) for name, cells in groups.items()},
-        "winner": winner, "double_gaussian": double, "single_gaussian": single,
+        "winner": winner,
+        "double_gaussian": double,
+        "single_gaussian": single,
         "delta_locked_test_vs_double_gaussian": (
             double["locked_test"]["score"] - winner["locked_test"]["score"]
-            if winner and winner["locked_test"] else None),
+            if winner and winner["locked_test"]
+            else None
+        ),
         "candidates": candidates,
     }
     out = run_dir / "rescore.json"

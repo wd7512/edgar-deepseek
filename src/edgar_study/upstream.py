@@ -6,7 +6,12 @@ import sys
 
 UPSTREAM_COMMIT = "0943922dcb73b12dbee8e440b3e1ff700cb49c10"
 UPSTREAM_MODULES = (
-    "diagnostic", "genetic_helpers", "hypothesis_engine", "loss_functions", "seed_programs", "utils",
+    "diagnostic",
+    "genetic_helpers",
+    "hypothesis_engine",
+    "loss_functions",
+    "seed_programs",
+    "utils",
 )
 PENALTY = 0.01  # score per free parameter, as in the paper and upstream main()
 MSE_SCALE = 10  # loss_functions.quadratic_loss reports 10 × MSE
@@ -27,8 +32,13 @@ def import_upstream(checkout):
     import seed_programs
     import utils
 
-    return {"commit": UPSTREAM_COMMIT, "hypothesis_engine": hypothesis_engine,
-            "loss_functions": loss_functions, "seed_programs": seed_programs, "utils": utils}
+    return {
+        "commit": UPSTREAM_COMMIT,
+        "hypothesis_engine": hypothesis_engine,
+        "loss_functions": loss_functions,
+        "seed_programs": seed_programs,
+        "utils": utils,
+    }
 
 
 def score_program(upstream, model, estimator, x, y, max_iter):
@@ -37,8 +47,16 @@ def score_program(upstream, model, estimator, x, y, max_iter):
 
     np.random.seed(0)  # upstream samples cells for its compatibility checks with NumPy's RNG
     _, _, score, params = upstream["hypothesis_engine"].objective(
-        model, estimator, upstream["loss_functions"].quadratic_loss, x, y,
-        random_seed=0, max_iter=max_iter, tol=1e-6, param_penalty_weight=PENALTY)
+        model,
+        estimator,
+        upstream["loss_functions"].quadratic_loss,
+        x,
+        y,
+        random_seed=0,
+        max_iter=max_iter,
+        tol=1e-6,
+        param_penalty_weight=PENALTY,
+    )
     count = int(params.shape[1])
     return float(score), (float(score) - PENALTY * count) / MSE_SCALE, count, params
 

@@ -1,12 +1,9 @@
-"""Offline checks for the Go client, ledger, paid-model guard and tier mapping:
-uv run python -m edgar_study.test_go_client"""
+"""Offline checks for the Go client, ledger, paid-model guard and tier mapping."""
 
 import asyncio
 import json
 import os
-import tempfile
 import types
-from pathlib import Path
 
 import httpx
 
@@ -19,44 +16,64 @@ def fake_transport(replies, bodies):
         bodies.append(json.loads(request.content))
         status, payload = replies.pop(0)
         return httpx.Response(status, json=payload)
+
     return httpx.MockTransport(handler)
 
 
 def ok(text, list_cost=0.0):
-    return 200, {"model": "m", "choices": [{"message": {"content": text}}],
-                 "usage": {"completion_tokens": 3, "opencode": {"list_cost": list_cost}}}
+    return 200, {
+        "model": "m",
+        "choices": [{"message": {"content": text}}],
+        "usage": {"completion_tokens": 3, "opencode": {"list_cost": list_cost}},
+    }
 
 
 def fake_upstream():
     """Just enough of the upstream modules for engine.install to patch."""
+
     async def coroutine(*args, **kwargs):
         return None, None
-    utils = types.SimpleNamespace(create_program_prompt=None, create_parameter_estimator_prompt=None,
-                                  create_linked_prompt=None)
-    engine = types.SimpleNamespace(genai=types.SimpleNamespace(Client=None), translate_to_jax=coroutine,
-                                   generate_new_neuron_model=coroutine,
-                                   generate_new_parameter_estimator=coroutine)
+
+    utils = types.SimpleNamespace(
+        create_program_prompt=None, create_parameter_estimator_prompt=None, create_linked_prompt=None
+    )
+    engine = types.SimpleNamespace(
+        genai=types.SimpleNamespace(Client=None),
+        translate_to_jax=coroutine,
+        generate_new_neuron_model=coroutine,
+        generate_new_parameter_estimator=coroutine,
+    )
     return engine, utils
 
 
-async def main(directory):
+async def check_client(directory):
     os.environ.pop("OPENCODE_API_KEY_FILE", None)
     os.environ["OPENCODE_API_KEY"] = "test-key"
     ledger = Ledger(directory / "spend.jsonl", cap=1.0)
     go = GoClient(directory, ledger, session_id="test", free_models=["hy4-flash-free"])
-    replies = [ok("```python\ndef neuron_model(theta): return theta\n```"),
-               (500, {"error": "boom"}), ok("second try"),
-               (401, {"error": "bad key"}), ok("")]
+    replies = [
+        ok("```python\ndef neuron_model(theta): return theta\n```"),
+        (500, {"error": "boom"}),
+        ok("second try"),
+        (401, {"error": "bad key"}),
+        ok(""),
+    ]
     bodies = []
-    go._http = httpx.AsyncClient(base_url="https://example.invalid", transport=fake_transport(replies, bodies))
+    go._http = httpx.AsyncClient(
+        base_url="https://example.invalid", transport=fake_transport(replies, bodies)
+    )
 
     # Upstream's tiers and temperatures are mapped once, in the patched call_llm_async.
     engine, utils = fake_upstream()
     install(engine, utils, go, default_effort="none", temperature_scale=0.5)
     role.set("translation")
     assert "neuron_model" in await utils.call_llm_async("prompt", model_name="hy4-flash-free", temperature=0)
-    assert await utils.call_llm_async("prompt", model_name="hy4-flash-free#high", temperature=1.8,
-                                      img_bytes=b"png") == "second try"  # retried 5xx
+    assert (
+        await utils.call_llm_async(
+            "prompt", model_name="hy4-flash-free#high", temperature=1.8, img_bytes=b"png"
+        )
+        == "second try"
+    )  # retried 5xx
     assert await go.chat("hy4-flash-free", "prompt") is None  # 401 is not retried
     assert await go.chat("hy4-flash-free", "prompt") is None  # empty content counts as failure
     assert bodies[0]["reasoning_effort"] == "none" and bodies[0]["temperature"] == 0
@@ -82,9 +99,7 @@ async def main(directory):
     except BudgetExhausted:
         pass
     await go.close()
-    print("Go client checks passed.")
 
 
-if __name__ == "__main__":
-    with tempfile.TemporaryDirectory() as temp:
-        asyncio.run(main(Path(temp)))
+def test_client_ledger_and_tier_mapping(tmp_path):
+    asyncio.run(check_client(tmp_path))

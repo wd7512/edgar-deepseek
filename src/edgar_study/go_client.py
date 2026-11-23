@@ -7,6 +7,7 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -77,8 +78,17 @@ class Ledger:
 
 
 class GoClient:
-    def __init__(self, run_dir, ledger, session_id, free_models, allow_paid=False, max_concurrency=16,
-                 max_tokens=32_000, timeout_s=600):
+    def __init__(
+        self,
+        run_dir,
+        ledger,
+        session_id,
+        free_models,
+        allow_paid=False,
+        max_concurrency=16,
+        max_tokens=32_000,
+        timeout_s=600,
+    ):
         self.calls_path = Path(run_dir) / "api_calls.jsonl"
         self.calls_path.parent.mkdir(parents=True, exist_ok=True)
         self.ledger = ledger
@@ -87,8 +97,11 @@ class GoClient:
         self.allow_paid = allow_paid
         self.semaphore = asyncio.Semaphore(max_concurrency)
         self.max_tokens = max_tokens
-        self._http = httpx.AsyncClient(base_url=BASE_URL, timeout=timeout_s,
-                                       headers={**headers(load_key()), "x-opencode-session": session_id})
+        self._http = httpx.AsyncClient(
+            base_url=BASE_URL,
+            timeout=timeout_s,
+            headers={**headers(load_key()), "x-opencode-session": session_id},
+        )
 
     async def chat(self, model, prompt, temperature=None, effort=None, img_bytes=None, **meta):
         """Return the reply text, or None on failure (upstream scores None as a failed program)."""
@@ -98,34 +111,55 @@ class GoClient:
         content = prompt
         if img_bytes is not None:
             data = base64.b64encode(img_bytes).decode()
-            content = [{"type": "text", "text": prompt},
-                       {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{data}"}}]
-        body = {"model": model, "messages": [{"role": "user", "content": content}],
-                "max_tokens": self.max_tokens}
+            content = [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{data}"}},
+            ]
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": content}],
+            "max_tokens": self.max_tokens,
+        }
         if temperature is not None:
             body["temperature"] = temperature
         if effort:
             body["reasoning_effort"] = effort
-        record = {"role": role.get(), "model": model, "reasoning_effort": effort, "temperature": temperature,
-                  **meta, "image": img_bytes is not None, "prompt_sha256": code_key(prompt)}
+        record = {
+            "role": role.get(),
+            "model": model,
+            "reasoning_effort": effort,
+            "temperature": temperature,
+            **meta,
+            "image": img_bytes is not None,
+            "prompt_sha256": code_key(prompt),
+        }
 
         for attempt in (1, 2):
             async with self.semaphore:
                 started = time.time()
                 try:
                     response = await self._http.post("/chat/completions", json=body)
+                    payload: Any
                     status, payload = response.status_code, response.json()
                 except (httpx.HTTPError, ValueError) as error:
                     status, payload = None, {"error": f"{type(error).__name__}: {error}"}
             usage = payload.get("usage") or {}
             self.ledger.add(list_cost(usage), model=model, role=record["role"], session=self.session_id)
-            choice = (payload.get("choices") or [{}])[0]
+            choice: Any = (payload.get("choices") or [{}])[0]
             text = (choice.get("message") or {}).get("content") or None
-            self._log({**record, "attempt": attempt, "status": status,
-                       "latency_s": round(time.time() - started, 3),
-                       "served_model": payload.get("model"), "usage": usage,
-                       "finish_reason": choice.get("finish_reason"), "content_chars": len(text or ""),
-                       "error": None if status == 200 else str(payload.get("error", payload))[:500]})
+            self._log(
+                {
+                    **record,
+                    "attempt": attempt,
+                    "status": status,
+                    "latency_s": round(time.time() - started, 3),
+                    "served_model": payload.get("model"),
+                    "usage": usage,
+                    "finish_reason": choice.get("finish_reason"),
+                    "content_chars": len(text or ""),
+                    "error": None if status == 200 else str(payload.get("error", payload))[:500],
+                }
+            )
             if status == 200:
                 return text
             retry = status is None or status >= 500 or (status == 429 and "quota" not in str(payload).lower())
