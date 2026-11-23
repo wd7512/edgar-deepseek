@@ -17,22 +17,40 @@ def fit_cell(program, x, y, p0, method):
     def jac(p):
         return jacobian(program, x[None, :], p[None, :])[0]
 
+    def cost(p):
+        r = residual(p)
+        return 0.5 * np.sum(r * r)
+
+    def gradient(p):
+        with np.errstate(all="ignore"):
+            return jac(p).T @ residual(p)
+
     if method == "lbfgsb":
-
-        def cost(p):
-            r = residual(p)
-            return 0.5 * np.sum(r * r)
-
-        def gradient(p):
-            with np.errstate(all="ignore"):
-                return jac(p).T @ residual(p)
-
         result = minimize(
             cost,
             p0.astype(np.float64),
             jac=gradient,
             method="L-BFGS-B",
             options={"maxiter": 1000},
+        )
+        return result.x, result.nfev
+
+    if method == "bfgs":
+        result = minimize(
+            cost,
+            p0.astype(np.float64),
+            jac=gradient,
+            method="BFGS",
+            options={"maxiter": 1000},
+        )
+        return result.x, result.nfev
+
+    if method == "powell":
+        result = minimize(
+            cost,
+            p0.astype(np.float64),
+            method="Powell",
+            options={"maxiter": 1000, "maxfev": 5000},
         )
         return result.x, result.nfev
 
@@ -49,7 +67,11 @@ def fit_cell(program, x, y, p0, method):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--programs", nargs="+", default=["double-gaussian", "winner"])
-    parser.add_argument("--methods", nargs="+", default=["lm", "trf", "dogbox", "lbfgsb"])
+    parser.add_argument(
+        "--methods",
+        nargs="+",
+        default=["lm", "trf", "dogbox", "lbfgsb", "bfgs", "powell"],
+    )
     parser.add_argument("--cells", type=int, default=200)
     args = parser.parse_args(argv)
     for name in args.programs:

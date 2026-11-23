@@ -55,8 +55,8 @@ scores best.
 - [x] Baseline: JAX CPU `lm-bounded`, `lm`, `adam` on real discovery cells
 - [x] Numpy batched LM (CPU)
 - [x] Numba parallel LM (CPU)
-- [x] SciPy `least_squares` (`trf`, `dogbox`, `lm`) and L-BFGS-B on a cell subset
-- [x] PyTorch: CPU and MPS, LM (autodiff and analytic Jacobian) and Adam
+- [x] SciPy `least_squares` (`trf`, `dogbox`, `lm`), L-BFGS-B, BFGS and Powell on a cell subset
+- [x] PyTorch: CPU and MPS, LM (autodiff and analytic Jacobian), Adam and Muon
 - [x] TensorFlow: CPU, Adam and LM
 - [x] MLX: GPU LM and Adam
 - [x] Collect results into tables, write summary and recommendation
@@ -73,9 +73,10 @@ Data: real discovery cells, 1,055 cells × 856 fit + 856 held-out trials.
 | JAX | CPU | `lm`, `lm-bounded` (float32, compiled) | done |
 | numpy | CPU | batched LM, `lm-bounded` | done |
 | numba | CPU | parallel LM, `lm-bounded`, `prange` over 15 threads | done |
-| scipy | CPU | `least_squares` `lm` / `trf` / `dogbox`, `minimize` L-BFGS-B | done |
+| scipy | CPU | `least_squares` `lm` / `trf` / `dogbox`, `minimize` L-BFGS-B / BFGS / Powell | done |
 | torch | CPU | LM with analytic Jacobian | done |
 | torch | MPS | LM with analytic and autodiff Jacobians, Adam | done |
+| torch | MPS | Muon (per-cell and whole-batch Newton-Schulz) | done |
 | tensorflow | CPU | LM, Adam | done |
 | MLX | GPU | LM, Adam | done |
 
@@ -97,6 +98,7 @@ Median of 3 warm runs unless noted.
 | --- | --- | --- | --- |
 | JAX | 0.6.0 | none | CPU only. `edgar_study/__init__.py` exposes one XLA device per core (15 here); `jax-metal` is not installed and is unmaintained. |
 | PyTorch | 2.15.0 | MPS available | `torch.func.jacfwd`, `vmap`, `jvp` all run on MPS. |
+| Muon | torch 2.15.0 | MPS | Newton-Schulz orthogonalisation batched with `bmm`; no optimiser library needed. |
 | TensorFlow | 2.21.0 | none | `tf.config.list_physical_devices('GPU') == []`. `tensorflow-metal` does not support this TensorFlow. |
 | MLX | 0.32.4 | GPU | `mx.default_device() == gpu`. **`mx.linalg.solve` is not implemented on the GPU**; solved on the CPU stream via `mx.stream(mx.cpu)` on unified memory. |
 | numba | 0.68.1 | none | CPU only (no CUDA/Apple GPU backend); `prange` across 15 threads. |
@@ -130,21 +132,23 @@ Fit-only, median of 3–5 warm runs, seconds for all 1,055 cells. Sorted by time
 | 1 | numba | cpu | lm-bounded | analytic | 0.031 | 27 | 2.8196 | 28.8656 |
 | 2 | MLX | gpu | lm-bounded | analytic | 0.139 | 27 | 2.8196 | 28.8655 |
 | 3 | torch | mps | lm-bounded | analytic | 0.159 | 27 | 2.8196 | 28.8656 |
-| 4 | JAX | cpu | lm-bounded | autodiff | 0.211 | 27 | 2.8196 | 28.8655 |
+| 4 | JAX | cpu | lm-bounded | analytic | 0.211 | 27 | 2.8196 | 28.8655 |
 | 5 | tensorflow | cpu | lm-bounded | analytic | 0.279 | 27 | 2.8196 | 28.8655 |
 | 6 | torch | mps | lm-bounded | autodiff | 0.463 | 27 | 2.8196 | 28.8656 |
 | 7 | torch | cpu | lm-bounded | analytic | 0.525 | 27 | 2.8196 | 28.8656 |
 | 8 | torch | mps | lm | analytic | 0.550 | 100 | 2.8196 | 28.8738 |
 | 9 | numba | cpu | lm | analytic | 0.579 | 100 | 2.8196 | 28.8750 |
 | 10 | MLX | gpu | lm | analytic | 0.589 | 100 | 2.8196 | 28.8739 |
-| 11 | JAX | cpu | lm | autodiff | 0.695 | 100 | 2.8196 | 28.8738 |
+| 11 | JAX | cpu | lm | analytic | 0.695 | 100 | 2.8196 | 28.8738 |
 | 12 | tensorflow | cpu | lm | analytic | 1.012 | 100 | 2.8196 | 28.8739 |
 | 13 | torch | cpu | lm | analytic | 1.917 | 100 | 2.8196 | 28.8739 |
 | 14 | MLX | gpu | adam | analytic | 3.661 | 1000 | 2.8202 | 28.8655 |
-| 15 | tensorflow | cpu | adam | autodiff | 4.042 | 1000 | 2.8202 | 28.8655 |
+| 15 | tensorflow | cpu | adam | analytic | 4.042 | 1000 | 2.8202 | 28.8655 |
 | 16 | torch | mps | adam | autodiff | 4.970 | 1000 | 2.8202 | 28.8655 |
-| 17 | numpy | cpu | lm-bounded | analytic | 5.241 | 27 | 2.8196 | 28.8656 |
-| 18 | numpy | cpu | lm | analytic | 19.632 | 100 | 2.8196 | 28.8736 |
+| 17 | torch-muon | mps | muon-per-cell | analytic | 5.086 | 1000 | 2.8201 | 28.8754 |
+| 18 | numpy | cpu | lm-bounded | analytic | 5.241 | 27 | 2.8196 | 28.8656 |
+| 19 | torch-muon | mps | muon-global | analytic | 5.508 | 1000 | 2.8205 | 28.8519 |
+| 20 | numpy | cpu | lm | analytic | 19.632 | 100 | 2.8196 | 28.8736 |
 
 ### winner (H27, 11 parameters, 1,055 cells)
 
@@ -158,18 +162,20 @@ Fit-only, median of 3–5 warm runs, seconds for all 1,055 cells. Sorted by time
 | 4 | numba | cpu | lm | analytic | 1.006 | 100 | 2.7526 | 28.7838 |
 | 5 | MLX | gpu | lm-bounded | analytic | 1.012 | 100 | 2.7557 | 28.7017 |
 | 6 | MLX | gpu | lm | analytic | 1.132 | 100 | 2.7526 | 28.7848 |
-| 7 | JAX | cpu | lm-bounded | autodiff | 1.301 | 89 | 2.7516 | 28.6953 |
-| 8 | JAX | cpu | lm | autodiff | 1.316 | 100 | 2.7560 | 28.8265 |
-| 9 | tensorflow | cpu | adam | autodiff | 1.564 | 247 | 2.7736 | 28.6764 |
-| 10 | tensorflow | cpu | lm-bounded | analytic | 2.011 | 100 | 2.7555 | 28.7019 |
-| 11 | tensorflow | cpu | lm | analytic | 2.062 | 100 | 2.7530 | 28.7843 |
-| 12 | torch | mps | adam | autodiff | 2.420 | 417 | 2.7614 | 28.6753 |
-| 13 | torch | cpu | lm | analytic | 2.941 | 100 | 2.7530 | 28.7861 |
-| 14 | torch | cpu | lm-bounded | analytic | 2.948 | 100 | 2.7555 | 28.7020 |
-| 15 | torch | mps | lm-bounded | autodiff | 3.330 | 89 | 2.7519 | 28.6952 |
-| 16 | MLX | gpu | adam | analytic | 6.656 | 1000 | 2.7470 | 28.7412 |
-| 17 | numpy | cpu | lm-bounded | analytic | 22.685 | 100 | 2.7557 | 28.7027 |
-| 18 | numpy | cpu | lm | analytic | 22.827 | 100 | 2.7631 | 28.8212 |
+| 7 | torch-muon | mps | muon-per-cell | analytic | 1.189 | 196 | 2.7612 | 28.7321 |
+| 8 | JAX | cpu | lm-bounded | analytic | 1.301 | 89 | 2.7516 | 28.6953 |
+| 9 | JAX | cpu | lm | analytic | 1.316 | 100 | 2.7560 | 28.8265 |
+| 10 | tensorflow | cpu | adam | analytic | 1.564 | 247 | 2.7736 | 28.6764 |
+| 11 | tensorflow | cpu | lm-bounded | analytic | 2.011 | 100 | 2.7555 | 28.7019 |
+| 12 | tensorflow | cpu | lm | analytic | 2.062 | 100 | 2.7530 | 28.7843 |
+| 13 | torch | mps | adam | autodiff | 2.420 | 417 | 2.7614 | 28.6753 |
+| 14 | torch | cpu | lm | analytic | 2.941 | 100 | 2.7530 | 28.7861 |
+| 15 | torch | cpu | lm-bounded | analytic | 2.948 | 100 | 2.7555 | 28.7020 |
+| 16 | torch | mps | lm-bounded | autodiff | 3.330 | 89 | 2.7519 | 28.6952 |
+| 17 | torch-muon | mps | muon-global | analytic | 4.937 | 785 | 2.7652 | 28.6617 |
+| 18 | MLX | gpu | adam | analytic | 6.656 | 1000 | 2.7470 | 28.7412 |
+| 19 | numpy | cpu | lm-bounded | analytic | 22.685 | 100 | 2.7557 | 28.7027 |
+| 20 | numpy | cpu | lm | analytic | 22.827 | 100 | 2.7605 | 28.8212 |
 
 ### SciPy, single-threaded, `least_squares` and L-BFGS-B
 
@@ -179,18 +185,18 @@ extrapolated to 1,055 cells for comparison with the batched rows.
 
 | Program | Method | Cells | Seconds (subset) | Seconds / 1,055 cells | Evaluations | Train loss | Score |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| double-gaussian | `lm` | 200 | 0.28 | 1.50 | 9.3 | 3.0426 | 30.2195 |
-| double-gaussian | `trf` | 200 | 0.35 | 1.84 | 10.3 | 3.0426 | 30.2230 |
-| double-gaussian | `dogbox` | 200 | 0.31 | 1.66 | 9.1 | 3.0426 | 30.2199 |
-| double-gaussian | L-BFGS-B | 200 | 0.90 | 4.74 | 26.3 | 3.0426 | 30.2204 |
-| winner | `lm` | 200 | 4.74 | 25.00 | 141.5 | 2.9836 | 30.1542 |
-| winner | `trf` | 200 | 5.85 | 30.86 | 126.4 | 2.9815 | 30.1677 |
-| winner | `dogbox` | 200 | 6.26 | 33.00 | 137.6 | 2.9872 | 30.1376 |
-| winner | L-BFGS-B | 200 | 13.91 | 73.39 | 363.4 | 2.9718 | 30.1914 |
-
-SciPy has no batched second-order routine at this granularity: it optimises one cell at a time, so
-on `winner` it is ~100× slower per cell than the numba batch. For 5 parameters it is still only
-~1.5 s extrapolated, because each cell converges in ~9 evaluations.
+| double-gaussian | `lm` | 200 | 0.30 | 1.56 | 9.3 | 3.0426 | 30.2195 |
+| double-gaussian | `dogbox` | 200 | 0.32 | 1.68 | 9.1 | 3.0426 | 30.2199 |
+| double-gaussian | `trf` | 200 | 0.36 | 1.90 | 10.3 | 3.0426 | 30.2230 |
+| double-gaussian | `bfgs` | 200 | 0.81 | 4.30 | 20.2 | 3.0429 | 30.2285 |
+| double-gaussian | `lbfgsb` | 200 | 0.87 | 4.61 | 26.3 | 3.0426 | 30.2204 |
+| double-gaussian | `powell` | 200 | 1.92 | 10.15 | 206.3 | 3.0436 | 30.2079 |
+| winner | `bfgs` | 200 | 2.83 | 14.91 | 74.7 | 2.9830 | 30.1778 |
+| winner | `lm` | 200 | 5.04 | 26.61 | 141.5 | 2.9836 | 30.1542 |
+| winner | `trf` | 200 | 5.88 | 31.04 | 126.4 | 2.9815 | 30.1677 |
+| winner | `dogbox` | 200 | 6.32 | 33.31 | 137.6 | 2.9872 | 30.1376 |
+| winner | `powell` | 200 | 11.37 | 59.99 | 1109.7 | 2.9646 | 30.1775 |
+| winner | `lbfgsb` | 200 | 13.81 | 72.86 | 363.4 | 2.9718 | 30.1914 |
 
 ### Compile and warm-up costs
 
@@ -214,6 +220,26 @@ On `winner` Adam's shorter effective budget regularises better by 0.02 score poi
 wall time of numba's bounded LM. On `double-gaussian` the two are identical to four decimals.
 That reproduces the synthetic result in `docs/PHASE_0.md`: the win is fit quality, not speed.
 
+### Muon: orthogonalised momentum
+
+Muon is built for 2-D weight matrices, not for 5- or 11-parameter per-cell fits, so it was run two
+ways in PyTorch on MPS. The learning rate was picked on a 100-cell subset (200 steps, rates
+{3e-3, 1e-2, 3e-2}) and then fixed for the full run.
+
+| Program | Mode | Learning rate | Steps | Seconds | Train loss | Score |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| double-gaussian | per-cell (1×K) | 1e-2 | 1000 | 5.09 | 2.8201 | 28.8754 |
+| double-gaussian | whole batch (1055×K) | 3e-2 | 1000 | 5.51 | 2.8205 | **28.8519** |
+| winner | per-cell (1×K) | 3e-2 | 196 (non-finite stop) | 1.19 | 2.7612 | 28.7321 |
+| winner | whole batch (1055×K) | 3e-2 | 785 (non-finite stop) | 4.94 | 2.7652 | **28.6617** |
+
+Both modes are slower than bounded LM and neither beats it on training loss. Per-cell Muon is the
+honest application and is strictly worse: a 1×K matrix orthogonalises to a unit vector, so it is
+just normalised momentum with no curvature. The whole-batch variant gives the best *held-out*
+score in both programs (28.8519 and 28.6617, beating Adam's 28.6753 on `winner`) at a worse
+training loss — but it orthogonalises across independent cells, so parameter updates leak between
+cells. Treat that as a regulariser, not a valid per-cell fit; it is not a drop-in replacement.
+
 ## Summary and recommendation
 
 1. **Overall winner: numba batched `lm-bounded` on the CPU.** 31 ms for `double-gaussian` and
@@ -236,8 +262,12 @@ That reproduces the synthetic result in `docs/PHASE_0.md`: the win is fit qualit
 6. **numpy is the wrong tool for the batch** (5.2 s / 22.7 s): 1,055 tiny solves plus one
    (1,055, 856) temporary per parameter per iteration; it is a reference implementation, not a
    candidate.
-7. **Adam stays a niche option.** It gives the best `winner` held-out score (28.675) but is
+7. **Adam stays a niche option.** It gives a good `winner` held-out score (28.675) but is
    10–30× slower than bounded LM; keep it only if 0.02 score points matters more than seconds.
+8. **Muon does not fit this problem.** Per-cell Muon is normalised momentum and scores worse than
+   LM (28.8754 / 28.7321). The whole-batch variant accidentally regularises and gives the best
+   held-out scores (28.8519 / 28.6617), but it couples cells and is 5–20× slower, so it is a
+   curiosity rather than a candidate.
 
 Concretely: move the fitting hot loop to numba (or keep JAX where a compiled, dependency-light,
 portable path matters more than the last 7×), and do not spend effort on Metal for this shape.
@@ -252,6 +282,8 @@ GPU rows are the ones to re-measure.
 3. Confirmed for `winner` (Adam better score, far slower) and neutral for `double-gaussian`.
 4. Rejected as a *win*: MLX is the best GPU candidate but does not beat the CPU batch.
 5. Rejected: numpy is 25–100× slower than numba; BLAS does not rescue the 1,055-tiny-solves shape.
+6. Muon, added later: the per-cell form degenerates to normalised momentum and loses to LM; the
+   whole-batch form only wins on held-out score by mixing cells, which is not a per-cell fit.
 
 ## Decisions and notes
 
@@ -265,6 +297,11 @@ GPU rows are the ones to re-measure.
   unified memory; everything else in its loop stays on the GPU. Even so it is competitive.
 - The `winner` bounded LM exhausts its 100-iteration budget on most cells (1,045–1,047 of 1,055
   converged), which is why its score is slightly worse than JAX's 89-iteration run.
+- Muon has no built-in stopping rule here; both modes ran to the 1,000-step cap or until a
+  non-finite step. Its learning rate was tuned on 100 cells only, so its scores are optimistic
+  relative to the other rows, which use the project's fixed constants.
+- "Muon-global" orthogonalises the whole (1,055 × K) momentum matrix, so a cell's update depends
+  on the other cells' gradients. It is reported for completeness, not as a valid per-cell fit.
 
 ## Open questions
 
@@ -276,3 +313,5 @@ GPU rows are the ones to re-measure.
   `objective` plumbing are included? The JAX end-to-end numbers suggest roughly 25–60× overall.
 - Would more LM iterations (or a tighter tolerance) close the 0.006 `winner` gap to float64
   without losing the speed advantage?
+- Is the whole-batch Muon gain a genuine regulariser (e.g. shrinking per-cell variance), and would
+  a small cross-cell penalty reproduce it on top of LM without the coupling side effect?

@@ -14,6 +14,7 @@ uv run --with torch scripts/backend_bench/fit_torch.py --device cpu --algorithms
 uv run --with torch scripts/backend_bench/fit_torch.py --device mps --algorithms lm lm-bounded --jacobian analytic --repeats 3 >> "$OUT"
 uv run --with torch scripts/backend_bench/fit_torch.py --device mps --algorithms lm-bounded --jacobian autodiff --repeats 1 >> "$OUT"
 uv run --with torch scripts/backend_bench/fit_torch.py --device mps --algorithms adam --repeats 1 >> "$OUT"
+uv run --with torch scripts/backend_bench/fit_muon.py --device mps --steps 1000 --repeats 3 >> "$OUT"
 uv run --with tensorflow scripts/backend_bench/fit_tf.py --repeats 3 >> "$OUT" 2>/dev/null
 uv run --with mlx scripts/backend_bench/fit_mlx.py --repeats 3 >> "$OUT"
 echo "wrote $OUT"
