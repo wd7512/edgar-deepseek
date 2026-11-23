@@ -3,6 +3,7 @@
 import hashlib
 import subprocess
 import sys
+from pathlib import Path
 
 UPSTREAM_COMMIT = "0943922dcb73b12dbee8e440b3e1ff700cb49c10"
 UPSTREAM_MODULES = (
@@ -13,20 +14,22 @@ UPSTREAM_MODULES = (
     "seed_programs",
     "utils",
 )
+UPSTREAM_DIR = Path("src/edgar_upstream")
 PENALTY = 0.01  # score per free parameter, as in the paper and upstream main()
 MSE_SCALE = 10  # loss_functions.quadratic_loss reports 10 × MSE
 
 
 def import_upstream(checkout):
-    """Import the six upstream modules after checking they match the pinned commit byte for byte."""
+    """Import the six upstream modules from `src/edgar_upstream/` after checking they match the pinned commit byte for byte."""
+    folder = checkout / UPSTREAM_DIR
     for name in UPSTREAM_MODULES:
-        path = checkout / f"{name}.py"
+        path = folder / f"{name}.py"
         expected = subprocess.check_output(
             ["git", "-C", str(checkout), "show", f"{UPSTREAM_COMMIT}:{path.name}"]
         )
         if path.read_bytes() != expected:
             raise ValueError(f"{path.name} differs from pinned upstream.")
-    sys.path.insert(0, str(checkout))
+    sys.path.insert(0, str(folder))
     import hypothesis_engine
     import loss_functions
     import seed_programs

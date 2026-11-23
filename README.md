@@ -1,6 +1,6 @@
 # EDGAR × OpenCode Go
 
-This fork runs [EDGAR](https://github.com/reillytilbury/EDGAR)'s published equation-discovery loop unchanged, with OpenCode Go models in place of Gemini. The upstream modules stay byte-identical to commit `0943922`; `src/edgar_study/` swaps only the LLM call layer at runtime.
+This fork runs [EDGAR](https://github.com/reillytilbury/EDGAR)'s published equation-discovery loop unchanged, with OpenCode Go models in place of Gemini. The six upstream modules live unchanged in `src/edgar_upstream/` and stay byte-identical to commit `0943922`; `src/edgar_study/` swaps only the LLM call layer at runtime.
 
 - [docs/PHASE_0.md](docs/PHASE_0.md): the like-for-like replication, its protocol, and results.
 - [docs/ROADMAP.md](docs/ROADMAP.md): Phase 1 (agentic harness) and Phase 2 (custom harness) ideas.
@@ -110,6 +110,6 @@ uv run gate
 uv run check
 ```
 
-`gate` runs format, lint, type check, tests and the lock check. `check` enforces the mirrored test layout (`src/edgar_study/x.py` needs `tests/unit/test_x.py`), file-name portability, secrets, untracked paths and a `changes/` fragment per branch. The six upstream modules at the repo root are excluded from format and lint because they must stay byte-identical.
+`gate` runs format, lint, type check, tests and the lock check. `check` enforces the mirrored test layout (`src/edgar_study/x.py` needs `tests/unit/test_x.py`), file-name portability, secrets, untracked paths and a `changes/` fragment per branch. The six upstream modules in `src/edgar_upstream/` are excluded from format, lint and type checks because they must stay byte-identical.
 
 Coding agents: see [AGENTS.md](AGENTS.md). `uv run delegate` starts a worker in its own worktree using the `[tool.devtools.delegate]` settings in `pyproject.toml`.

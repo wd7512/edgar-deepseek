@@ -46,17 +46,17 @@ wills-agentic-tools = { git = "https://github.com/wd7512/wills-agentic-tools", t
 [tool.ruff]
 line-length = 110
 target-version = "py312"
-extend-exclude = [
-    "diagnostic.py", "genetic_helpers.py", "hypothesis_engine.py",
-    "loss_functions.py", "seed_programs.py", "utils.py", "docs/artifacts",
-]
+extend-exclude = ["src/edgar_upstream", "docs/artifacts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 ignore = ["E501", "SIM117"]
 
 [tool.ty.src]
-include = ["src"]
+include = ["src/edgar_study"]
+
+[tool.ty.environment]
+extra-paths = ["src/edgar_upstream"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -64,7 +64,7 @@ addopts = "-ra"
 timeout = 300
 
 [tool.devtools.gate]
-source = "src/"
+source = "src/edgar_study/"
 tests = ["tests"]
 
 [tool.devtools.check]
@@ -85,7 +85,7 @@ base = "origin/main"
 base = "origin/main"
 gate_command = "uv run gate"
 extra_rules = [
-    "Never modify the six pinned upstream modules at the repo root.",
+    "Never modify the six pinned upstream modules in src/edgar_upstream/.",
     "Never call paid models or pass --allow-paid.",
     "Tests must not need the dataset or an API key.",
 ]
