@@ -60,7 +60,8 @@ scores best.
 - [x] TensorFlow: CPU, Adam and LM
 - [x] MLX: GPU LM and Adam
 - [x] Collect results into tables, write summary and recommendation
-- [ ] `uv run gate` and `uv run check`, `changes/` fragment, commit, push, open PR
+- [x] `uv run gate` and `uv run check`, `changes/` fragment, commit, push
+- [ ] Open the pull request (needs a GitHub token; no `gh` allowed here)
 
 ## Experiment matrix
 
