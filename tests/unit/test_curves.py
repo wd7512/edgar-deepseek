@@ -1,4 +1,4 @@
-"""Offline checks for the ten paper curves and the fit-timing benchmark."""
+"""Offline checks for the ten paper curves, their estimators and the synthetic cells."""
 
 import math
 

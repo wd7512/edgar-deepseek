@@ -60,7 +60,6 @@ include = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = ["test_*.py", "curve_fitting.py"]
 addopts = "-ra"
 timeout = 300
 

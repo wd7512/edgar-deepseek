@@ -1,28 +1,20 @@
-"""Ten tuning-curve equations from Tilbury et al. 2025 and a benchmark of how long each takes to fit.
+"""Ten tuning-curve equations from Tilbury et al. 2025, with estimators and synthetic cells to fit them to.
 
 The equations are the human-written seeds and the winner's family tree from the paper's
 Supplementary Text 3, plus the two von Mises seeds shipped with upstream. S2, the double Gaussian,
 is the paper's baseline and H27 is its winning equation. A12 is left out because the paper lists it
 as identical to A9.
 
-Every curve is a JAX model `model(theta, *params)` with a numpy parameter estimator, so the
-benchmark can run each one through `hypothesis_engine.objective` and time the same path a search
-pays for every proposed program: estimate, validate, fit and score.
+Every curve is a JAX model `model(theta, *params)` with a numpy parameter estimator, in the form
+`hypothesis_engine.objective` takes, so each can go through the same estimate, validate, fit and
+score path a search pays for every proposed program. `scripts/fit_timings` times that path.
 """
 
-import logging
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
-
-from edgar_study import fitting
-from edgar_study.upstream import PENALTY, import_upstream
-
-log = logging.getLogger(__name__)
 
 BASELINE = "double-gaussian"
 WINNER = "winner"
@@ -265,77 +257,3 @@ def synthetic_cells(n_cells=24, n_trials=144, seed=0):
         y[cell] = np.clip(rate + rng.normal(0, 0.15 * a1, n_trials), 0, None)
     y = 100 * y / np.linalg.norm(y, axis=1, keepdims=True)
     return jnp.asarray(x), jnp.asarray(y)
-
-
-def benchmark(
-    fitters=("upstream", "adam", "lm"),
-    n_cells=24,
-    n_trials=144,
-    max_iter=1_000,
-    curves=CURVES,
-    upstream=Path("."),
-):
-    """Time `hypothesis_engine.objective` for each curve under each fitter on the same synthetic cells.
-
-    Each fit runs twice. The first call includes XLA compilation, which a search pays for every new
-    program; the repeat shows the steady-state cost. Returns one row per (fitter, curve).
-    """
-    modules = import_upstream(Path(upstream).resolve())
-    engine, loss = modules["hypothesis_engine"], modules["loss_functions"].quadratic_loss
-    x, y = synthetic_cells(n_cells, n_trials)
-    rows = []
-    for fitter in fitters:
-        objective = (
-            engine.objective if fitter == "upstream" else fitting.make_objective(engine.objective, fitter)
-        )
-        for curve in curves:
-            timings = []
-            for _ in range(2):
-                np.random.seed(0)
-                start = time.perf_counter()
-                _, _, score, params = objective(
-                    curve.model,
-                    curve.estimator,
-                    loss,
-                    x,
-                    y,
-                    param_penalty_weight=PENALTY,
-                    max_iter=max_iter,
-                )
-                timings.append(time.perf_counter() - start)
-            row = {
-                "program": curve.name,
-                "paper_id": curve.paper_id,
-                "fitter": fitter,
-                "params": curve.n_params,
-                "first_seconds": timings[0],
-                "repeat_seconds": timings[1],
-                "train_loss": fitting.train_loss(curve.model, loss, params, x, y),
-                "test_loss": score - PENALTY * curve.n_params,
-                "score": score,
-            }
-            log.info(
-                "%s %s: first %.2fs, repeat %.2fs, test loss %.4f",
-                fitter,
-                curve.name,
-                row["first_seconds"],
-                row["repeat_seconds"],
-                row["test_loss"],
-            )
-            rows.append(row)
-    return rows
-
-
-def benchmark_table(rows):
-    """Format benchmark rows as a Markdown table."""
-    lines = [
-        "| Program | Paper ID | Params | Fitter | First call (s) | Repeat (s) | Train loss | Test loss |",
-        "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |",
-    ]
-    for r in rows:
-        lines.append(
-            f"| {r['program']} | {r['paper_id']} | {r['params']} | {r['fitter']} | "
-            f"{r['first_seconds']:.2f} | {r['repeat_seconds']:.2f} | "
-            f"{r['train_loss']:.4f} | {r['test_loss']:.4f} |"
-        )
-    return "\n".join(lines)
