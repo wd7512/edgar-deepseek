@@ -75,6 +75,7 @@ mirror_exceptions = [
     "src/edgar_study/preflight.py",
     "src/edgar_study/report.py",
     "src/edgar_study/rescore.py",
+    "tests/unit/test_backend_bench.py",
 ]
 untracked_paths = ["data/", "results/"]
 changelog_dir = "changes"
