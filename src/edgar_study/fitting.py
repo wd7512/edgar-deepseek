@@ -217,8 +217,12 @@ def _least_squares(model, x, y):
     return cost, step
 
 
-def _update_damping(damping, accept):
-    return jnp.clip(jnp.where(accept, damping / 3, damping * 4), 1e-7, MAX_DAMPING)
+def _update_damping(damping, accept, capped=False):
+    """Lower damping after a full accepted step; raise it after a rejected or capped one, so a step
+    that keeps hitting the cap turns towards scaled gradient descent instead of a truncated
+    Gauss–Newton step."""
+    lowered = jnp.where(capped, damping * 2, damping / 3)
+    return jnp.clip(jnp.where(accept, lowered, damping * 4), 1e-7, MAX_DAMPING)
 
 
 def fit_lm(model, params, x, y, iterations=LM_ITERATIONS):
@@ -273,6 +277,7 @@ def fit_lm_bounded(
         i, p, damping, c, done = state
         step = lm_step(p, damping)
         biggest = jnp.max(jnp.abs(step), axis=1, keepdims=True)
+        capped = biggest[:, 0] > max_step
         candidate = p + step * jnp.minimum(1.0, max_step / jnp.maximum(biggest, 1e-30))
         new_cost = cost(candidate)
         accept = ~done & (new_cost < c)
@@ -280,7 +285,7 @@ def fit_lm_bounded(
         return (
             i + 1,
             jnp.where(accept[:, None], candidate, p),
-            jnp.where(done, damping, _update_damping(damping, accept)),
+            jnp.where(done, damping, _update_damping(damping, accept, capped)),
             jnp.where(accept, new_cost, c),
             done | converged,
         )

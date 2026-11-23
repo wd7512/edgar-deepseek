@@ -20,12 +20,14 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import jax
 import numpy as np
 from jax import monitoring
 
 from edgar_study import curves, fitting
+from edgar_study.datasets import load_dataset, prepare
 from edgar_study.upstream import PENALTY, import_upstream
 
 log = logging.getLogger("fit_timings")
@@ -36,6 +38,12 @@ SIZES = {
     "real": {"n_cells": 1_055, "n_trials": 428, "steps": 1_000},
 }
 FITTERS = ("upstream", "adam", "lm", "lm-bounded")
+SEEDS = (
+    ("seed-gaussian", "seed 1", 1),
+    ("seed-double-gaussian", "seed 2", 2),
+    ("seed-von-mises", "seed 3", 3),
+    ("seed-double-von-mises", "seed 4", 4),
+)
 COMPILE_EVENTS = (
     "/jax/core/compile/jaxpr_trace_duration",
     "/jax/core/compile/jaxpr_to_mlir_module_duration",
@@ -108,12 +116,29 @@ def time_fit(objective, curve, loss, x, y, steps, clock):
     }
 
 
-def benchmark(fitters, selected, n_cells, n_trials, steps, lm_iterations, repeats):
-    """One row per (fitter, curve) with the median of `repeats` timed calls."""
-    with contextlib.redirect_stdout(io.StringIO()):
-        modules = import_upstream(ROOT)
-    engine, loss = modules["hypothesis_engine"], modules["loss_functions"].quadratic_loss
-    x, y = curves.synthetic_cells(n_cells, n_trials)
+def seed_programs(modules):
+    """Upstream's four seed programs, each with its own JAX model and numpy estimator."""
+    seeds = modules["seed_programs"]
+    programs = []
+    for name, paper_id, number in SEEDS:
+        model = getattr(seeds, f"neuron_model_{number}_jax")
+        n_params = model.__code__.co_argcount - 1
+        estimator = getattr(seeds, f"parameter_estimator_{number}")
+        programs.append(
+            SimpleNamespace(name=name, paper_id=paper_id, n_params=n_params, model=model, estimator=estimator)
+        )
+    return programs
+
+
+def discovery_cells(path, modules):
+    """The real recording's discovery cells, prepared exactly as a search receives them."""
+    response, angles, _ = load_dataset(path, modules["utils"].extract_stimulus_related_response)
+    x, y, groups, _ = prepare(response, angles, "strict-holdout-v1")
+    return x[groups["discovery"]], y[groups["discovery"]]
+
+
+def benchmark(engine, loss, fitters, selected, x, y, steps, lm_iterations, repeats):
+    """One row per (fitter, program) with the median of `repeats` timed calls."""
     clock = CompileClock()
     stops = StopLog()
     time_fit(engine.objective, selected[0], loss, x[:2], y[:2], 1, clock)
@@ -182,7 +207,7 @@ def cpu_name():
     return platform.processor() or platform.machine()
 
 
-def header(args, n_cells, n_trials, steps):
+def header(args, n_cells, n_trials, steps, data):
     commit = subprocess.run(
         ["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"], capture_output=True, text=True
     ).stdout.strip()
@@ -192,7 +217,7 @@ def header(args, n_cells, n_trials, steps):
             f"## {datetime.date.today().isoformat()}, `{args.size}`, commit `{commit}`",
             "",
             f"- Command: `{command.strip()}`",
-            f"- Data: {n_cells} synthetic cells × {n_trials} trials, drawn from the winner (H27)",
+            f"- Data: {n_cells} cells × {n_trials} trials, {data}",
             f"- Adam steps: {steps}; LM iterations: {args.lm_iterations}; median of {args.repeats} call(s)",
             f"- Host: {cpu_name()}, {os.cpu_count()} cores, "
             f"{len(jax.devices())} JAX {jax.default_backend()} device(s), JAX {jax.__version__}",
@@ -208,18 +233,31 @@ def main(argv=None):
     parser.add_argument("--steps", type=int, help="override the size's Adam step count")
     parser.add_argument("--lm-iterations", type=int, default=fitting.LM_ITERATIONS)
     parser.add_argument("--fitters", nargs="+", choices=FITTERS, default=list(FITTERS))
-    parser.add_argument("--curves", nargs="+", choices=[c.name for c in curves.CURVES])
+    parser.add_argument(
+        "--curves", nargs="+", choices=[c.name for c in curves.CURVES] + [name for name, _, _ in SEEDS]
+    )
     parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument(
+        "--dataset", type=Path, help="time on this recording's discovery cells instead of synthetic cells"
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     size = SIZES[args.size]
-    n_cells = args.cells or size["n_cells"]
-    n_trials = args.trials or size["n_trials"]
     steps = args.steps or size["steps"]
-    selected = [c for c in curves.CURVES if not args.curves or c.name in args.curves]
-    rows = benchmark(args.fitters, selected, n_cells, n_trials, steps, args.lm_iterations, args.repeats)
-    print(header(args, n_cells, n_trials, steps) + "\n\n" + table(rows))
+    with contextlib.redirect_stdout(io.StringIO()):
+        modules = import_upstream(ROOT)
+    engine, loss = modules["hypothesis_engine"], modules["loss_functions"].quadratic_loss
+    if args.dataset:
+        x, y = discovery_cells(args.dataset, modules)
+        data = f"discovery cells of `{args.dataset.name}`"
+    else:
+        x, y = curves.synthetic_cells(args.cells or size["n_cells"], args.trials or size["n_trials"])
+        data = "synthetic, drawn from the winner (H27)"
+    programs = [*curves.CURVES, *seed_programs(modules)]
+    selected = [c for c in programs if not args.curves or c.name in args.curves]
+    rows = benchmark(engine, loss, args.fitters, selected, x, y, steps, args.lm_iterations, args.repeats)
+    print(header(args, *y.shape, steps, data) + "\n\n" + table(rows))
 
 
 if __name__ == "__main__":
