@@ -82,6 +82,7 @@ Nearly all run time is per-cell curve fitting: 1,000 Adam steps over 1,055 cells
 | `upstream` | upstream's Python loop, unchanged | GPU hosts, exact reproduction |
 | `adam` | the same Adam schedule compiled into one XLA loop, cells split across CPU cores (same scores to about 1e-4) | CPU hosts |
 | `lm` | Levenberg–Marquardt to convergence: much faster for small models, but scores differently | experiments only |
+| `lm-bounded` | Levenberg–Marquardt with each parameter's step capped at 0.25, stopping each cell at a 1e-4 relative tolerance (at most 100 iterations): lower training loss than Adam and scores within about 1%, many times faster | fast searches |
 
 `src/edgar_study/__init__.py` exposes one XLA CPU device per core so cells can be split across cores. `rescore` uses the run's own fitter unless `--fitter` is given.
 

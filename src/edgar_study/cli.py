@@ -119,12 +119,13 @@ def main():
     fitter = argparse.ArgumentParser(add_help=False)
     fitter.add_argument(
         "--fitter",
-        choices=("auto", "upstream", "adam", "lm"),
+        choices=("auto", "upstream", "adam", "lm", "lm-bounded"),
         default=None,
         help="Per-cell parameter fitting. auto (run default): compiled Adam split across "
         "CPU cores when JAX has only a CPU, upstream's loop otherwise. lm is "
-        "Levenberg-Marquardt, faster but scores differently. rescore defaults to "
-        "the run's own fitter.",
+        "Levenberg-Marquardt, faster but scores differently. lm-bounded caps each "
+        "parameter step and stops at a tolerance: about Adam's scores in far less time. "
+        "rescore defaults to the run's own fitter.",
     )
     dataset = argparse.ArgumentParser(add_help=False)
     dataset.add_argument("--dataset", type=Path, required=True)

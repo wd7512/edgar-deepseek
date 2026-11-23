@@ -1,0 +1,1 @@
+Added `--fitter lm-bounded`: Levenberg–Marquardt with a per-parameter step cap and a per-cell tolerance stop, which reaches Adam's fit quality many times faster. `make_objective` now rejects unknown fitter names instead of silently using Adam.
