@@ -40,6 +40,8 @@ LM_ITERATIONS = 100
 LM_BOUNDED_MAX_STEP = 0.25
 LM_BOUNDED_TOLERANCE = 1e-4
 MAX_DAMPING = 1e7
+MULTISTART_STARTS = 8
+MULTISTART_SCALE = 0.5
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +50,12 @@ class BoundedFit(NamedTuple):
     params: np.ndarray
     iterations: int
     converged: int
+
+
+class MultiStartFit(NamedTuple):
+    params: np.ndarray
+    best_start: np.ndarray
+    cost: np.ndarray
 
 
 def resolve(fitter):
@@ -298,6 +306,46 @@ def fit_lm_bounded(
 
     fitted, iterations, done = jax.device_get(run(params))
     return BoundedFit(fitted[:n_cells], int(iterations), int(np.sum(done[:n_cells])))
+
+
+def perturbed_starts(params, starts, seed=0, scale=MULTISTART_SCALE):
+    """`params` followed by `starts - 1` copies with Gaussian noise of `scale` × (|parameter| + 1)."""
+    params = np.asarray(params)
+    noise = np.random.default_rng(seed).standard_normal((starts - 1, *params.shape))
+    jittered = params + scale * noise * (np.abs(params) + 1)
+    return np.concatenate([params[None], jittered.astype(params.dtype)])
+
+
+def fit_multistart(
+    model,
+    params,
+    x,
+    y,
+    starts=MULTISTART_STARTS,
+    seed=0,
+    max_iterations=LM_ITERATIONS,
+    tolerance=LM_BOUNDED_TOLERANCE,
+):
+    """Run `fit_lm_bounded` from `params` and `starts - 1` perturbed copies of it, all in one batch,
+    and keep each cell's fit with the lowest squared error. The first start is `params` itself, so a
+    cell never ends worse than a single bounded fit from the same start; ties go to it."""
+    candidates = perturbed_starts(params, starts, seed)
+    k, cells, n = candidates.shape
+    x_all, y_all = np.tile(np.asarray(x), (k, 1)), np.tile(np.asarray(y), (k, 1))
+    fit = fit_lm_bounded(
+        model,
+        candidates.reshape(k * cells, n),
+        x_all,
+        y_all,
+        tolerance=tolerance,
+        max_iterations=max_iterations,
+    )
+    cost, _ = _least_squares(model, jnp.asarray(x_all), jnp.asarray(y_all))
+    costs = np.asarray(cost(jnp.asarray(fit.params))).reshape(k, cells)
+    costs = np.where(np.isfinite(costs), costs, np.inf)
+    best = np.argmin(costs, axis=0)
+    cell = np.arange(cells)
+    return MultiStartFit(fit.params.reshape(k, cells, n)[best, cell], best, costs[best, cell])
 
 
 def benchmark_report(rows):
