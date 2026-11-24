@@ -252,6 +252,7 @@ dependencies = [
     { name = "jax" },
     { name = "jaxopt" },
     { name = "matplotlib" },
+    { name = "neat-python" },
     { name = "numpy" },
     { name = "optax" },
     { name = "pandas" },
@@ -280,6 +281,7 @@ requires-dist = [
     { name = "jax", specifier = "==0.6.0" },
     { name = "jaxopt", specifier = "==0.8.5" },
     { name = "matplotlib", specifier = "==3.10.3" },
+    { name = "neat-python", specifier = "==2.0.0" },
     { name = "numpy", specifier = "==2.2.5" },
     { name = "optax", specifier = "==0.2.4" },
     { name = "pandas", specifier = "==2.2.3" },
@@ -565,6 +567,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/98/cc/d6949ae90ff708e8b9f1889f4e6bdb74c31b2603fa29936a97b52dd784fa/ml_dtypes-0.7.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:3c4e47f553a04d33886160a9600e2313e5bee8c1c3da997baa23c8fecbfab189", size = 463670, upload-time = "2026-11-16T16:20:42.875Z" },
     { url = "https://files.pythonhosted.org/packages/60/21/3ca0cb91c528d6250d356e62645d868dc3276cb701cc194a2ae40ca99a83/ml_dtypes-0.7.0-cp312-cp312-win_amd64.whl", hash = "sha256:0b1d09c91aaa6f38052521d5377cecb1523f50d4aee7783183a955a6544b8ad6", size = 463335, upload-time = "2026-11-16T16:20:44.317Z" },
     { url = "https://files.pythonhosted.org/packages/61/e0/6d97837f234b658a4f553b59b95e24799a4bd8e544e536435d8e85e0f005/ml_dtypes-0.7.0-cp312-cp312-win_arm64.whl", hash = "sha256:b29d506d51d994efce5e1f214a6cab77d96b796c5ab59a63f23d9a8c5b20e4dd", size = 587991, upload-time = "2026-11-16T16:20:45.95Z" },
+]
+
+[[package]]
+name = "neat-python"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/78/2d/6d3d96cde074bcbdc3fae08383bb6a9b2da2f98c405d16acceccc36c14c3/neat_python-2.0.0.tar.gz", hash = "sha256:fcfb5020aa3df5c12638865296589159939db08e9aa4191d9cf4e5b242a5d9cf", size = 126031, upload-time = "2026-03-02T17:13:16.587Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/a6/e85e39f593e3bd8ccc2dc57abf60c9a51fbc542616531629d988c05de484/neat_python-2.0.0-py3-none-any.whl", hash = "sha256:4ba18bec7b1d1dfa659348e28156f36007ebc111d46eb4ddc07a128377b459f7", size = 54056, upload-time = "2026-03-02T17:13:15.233Z" },
 ]
 
 [[package]]

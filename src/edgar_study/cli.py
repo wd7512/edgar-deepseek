@@ -205,6 +205,25 @@ def main():
     )
     run.set_defaults(func=lambda args: _load("engine", "run")(args))
 
+    neat = commands.add_parser(
+        "neat",
+        parents=[dataset, upstream, fitter],
+        help="Evolve tuning-curve networks with NEAT and score them with EDGAR's objective.",
+    )
+    neat.add_argument("--population", type=int, default=96)
+    neat.add_argument("--generations", type=int, default=6)
+    neat.add_argument("--seed", type=int, default=0)
+    neat.add_argument("--top", type=int, default=10)
+    neat.add_argument(
+        "--cell-fraction",
+        type=float,
+        default=0.25,
+        help="Search on this random fraction of the discovery cells only (rescore still "
+        "uses the full selection and locked-test cells).",
+    )
+    neat.add_argument("--results", type=Path, default=Path("results"))
+    neat.set_defaults(func=lambda args: _load("neat_search", "run")(args))
+
     rescore = commands.add_parser(
         "rescore",
         parents=[dataset, upstream, fitter],

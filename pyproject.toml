@@ -10,6 +10,7 @@ dependencies = [
     "jax==0.6.0",
     "jaxopt==0.8.5",
     "matplotlib==3.10.3",
+    "neat-python==2.0.0",
     "numpy==2.2.5",
     "optax==0.2.4",
     "pandas==2.2.3",

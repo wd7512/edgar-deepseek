@@ -30,6 +30,14 @@ uv run edgar rescore --run results/runs/<run-id> --dataset $DATA
 
 `run` searches the discovery cells; `rescore` picks a winner on the selection cells and scores it on the locked test cells. Add `--iterations 2 --islands 4 --cell-fraction 0.25` for a 30-minute run. Paid models need `--allow-paid`; spend stops at $9.50.
 
+## NEAT baseline
+
+```bash
+uv run edgar neat --dataset $DATA --population 96 --generations 6 --cell-fraction 0.25
+```
+
+Evolves feed-forward tuning-curve networks whose weights are fitted per cell and scored by the same objective as EDGAR's programs. The top genomes then go through the usual selection and locked-cell holdout. Runs are written to `results/neat/<run-id>/` with the winner's source. Results for the 25% proof-of-concept run are in [docs/NEAT.md](docs/NEAT.md).
+
 ## Develop
 
 ```bash
