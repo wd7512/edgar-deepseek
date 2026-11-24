@@ -14,7 +14,7 @@ import numpy as np
 
 from edgar_study import fitting
 from edgar_study.datasets import load_dataset, prepare
-from edgar_study.exponents import amplitude_pair, clip_bounds, exponent_pair, fitted_exponents
+from edgar_study.exponents import amplitude_pair, clip_bounds, exponent_groups, fitted_exponents
 from edgar_study.upstream import combined_file, import_upstream, score_program, searched_programs
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -61,7 +61,7 @@ if exponents is None:
         f"Winner {w['id']} has no pair of peak exponents; the page's peakiness figure needs one."
     )
 pc1, pc2 = exponents
-low, high = clip_bounds(w["jax_code"], exponent_pair(names)[0])
+low, high = clip_bounds(w["jax_code"], exponent_groups(names)[0][0])
 low, high = (low, high) if np.isfinite(low) and np.isfinite(high) else (0.0, 4.0)
 amps = amplitude_pair(names)
 a1, a2 = (wp[:, names.index(a)] for a in amps) if amps else (None, None)

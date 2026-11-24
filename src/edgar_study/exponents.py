@@ -24,6 +24,18 @@ def exponent_pair(names):
     return _pair(names, PAIRS)
 
 
+def exponent_groups(names):
+    """Each peak's exponent names: one per peak, or a left and a right one per peak. None if neither."""
+    pair = exponent_pair(names)
+    if pair is not None:
+        return (pair[0],), (pair[1],)
+    for stem in ("shape", "power", "exponent"):
+        groups = tuple((f"{stem}_{k}_left", f"{stem}_{k}_right") for k in (1, 2))
+        if all(name in names for group in groups for name in group):
+            return groups
+    return None
+
+
 def amplitude_pair(names):
     """The names of the two peak amplitudes among a program's parameter names, or None."""
     return _pair(names, AMPLITUDES)
@@ -44,8 +56,15 @@ def clip_bounds(code, name):
 
 
 def fitted_exponents(names, params, code):
-    """Both exponents per cell as the program uses them (clipped to its own bounds), or None."""
-    pair = exponent_pair(names)
-    if pair is None:
+    """Each peak's exponent per cell as the program uses it (clipped to its own bounds), or None.
+
+    A peak with a separate exponent on each side counts its sharper (lower) side, which sets the
+    shape of its tip.
+    """
+    groups = exponent_groups(names)
+    if groups is None:
         return None
-    return tuple(np.clip(params[:, names.index(name)], *clip_bounds(code, name)) for name in pair)
+    return tuple(
+        np.min([np.clip(params[:, names.index(name)], *clip_bounds(code, name)) for name in group], axis=0)
+        for group in groups
+    )

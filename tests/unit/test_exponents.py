@@ -42,3 +42,15 @@ def test_amplitude_pair_finds_each_runs_naming():
     assert amplitude_pair(["amplitude_1", "x", "amplitude_2"]) == ("amplitude_1", "amplitude_2")
     assert amplitude_pair(["amp_1", "amp_2"]) == ("amp_1", "amp_2")
     assert amplitude_pair(["gain"]) is None
+
+
+def test_a_peak_with_an_exponent_on_each_side_counts_its_sharper_side():
+    from edgar_study.exponents import exponent_groups
+
+    names = ["shape_1_left", "shape_1_right", "shape_2_left", "shape_2_right"]
+    assert exponent_groups(names) == (("shape_1_left", "shape_1_right"), ("shape_2_left", "shape_2_right"))
+    params = np.array([[1.5, 0.2, 3.0, 2.5]])
+    code = "\n".join(f"{n} = jnp.clip({n}, 0.5, 6.0)" for n in names)
+    first, second = fitted_exponents(names, params, code)
+    assert first.tolist() == [0.5]
+    assert second.tolist() == [2.5]
