@@ -160,14 +160,14 @@ def wave_analysis(models, fitted, results, winner_id, x, y, n_examples=4):
         bins = (theta / (2 * np.pi) * 24).astype(int) % 24
         curves = {
             name: np.asarray(models[name][0](jnp.asarray(grid), *fitted[name][k]))
-            for name in ("Double Gaussian", "AI model", "AI model + wave")
+            for name in ("Double Gaussian", "AI model", "AI model + wave", winner_name)
         }
         examples.append(
             {
                 "row": int(k),
                 "r2": {
                     name: float(results[name]["r2"][k])
-                    for name in ("Double Gaussian", "AI model", "AI model + wave")
+                    for name in ("Double Gaussian", "AI model", "AI model + wave", winner_name)
                 },
                 "wave_size": float(size[k]),
                 "means": [
@@ -225,6 +225,43 @@ def example_cell(models, fitted, results, groups, x, y, fit_trials, held_out):
         },
         "r2": {name: float(results[name]["r2"][row]) for name in shown},
     }
+
+
+def improved_cells(models, fitted, results, groups, x, y):
+    """Four locked-test cells by how much the winner improves held-out R² over the double Gaussian."""
+    winner_name = next(k for k in models if k.startswith("EDGAR winner"))
+    shown = ["Double Gaussian", "AI model", winner_name]
+    locked = groups["locked_test"]
+    gain = results[winner_name]["r2"][locked] - results["Double Gaussian"]["r2"][locked]
+    order = np.argsort(-gain)
+    picks = {
+        "largest gain": order[0],
+        "4th largest gain": order[3],
+        "75th percentile": order[len(order) // 4],
+        "median": order[len(order) // 2],
+    }
+    grid = np.linspace(0, 2 * np.pi, 181)
+    cells = []
+    for label, k in picks.items():
+        row = int(locked[k])
+        theta, response = np.asarray(x[row]), np.asarray(y[row])
+        bins = np.round(theta / (2 * np.pi) * 12).astype(int) % 12
+        cells.append(
+            {
+                "row": row,
+                "label": label,
+                "points": np.stack([np.degrees(theta), response], axis=1).round(2).tolist(),
+                "means": [
+                    [b * 30.0, float(response[bins == b].mean())] for b in range(12) if np.any(bins == b)
+                ],
+                "curves": {
+                    name: predict(models[name][0], fitted[name][row : row + 1], grid)[0].round(3).tolist()
+                    for name in shown
+                },
+                "r2": {name: float(results[name]["r2"][row]) for name in shown},
+            }
+        )
+    return {"grid_deg": np.degrees(grid).round(1).tolist(), "cells": cells}
 
 
 def main():
@@ -291,6 +328,7 @@ def main():
 
     wave = wave_analysis(models, fitted, results, winner_id, x, y)
     example = example_cell(models, fitted, results, groups, x, y, fit_trials, held_out)
+    improved = improved_cells(models, fitted, results, groups, x, y)
 
     baseline_r2 = results["Double Gaussian"]["r2"]
     for entry in results.values():
@@ -328,6 +366,7 @@ def main():
         "all_cells_models": all_cells,
         "wave": wave,
         "example_cell": example,
+        "improved_cells": improved,
         "all_cells_count": int(len(every)),
         "seconds": round(time.time() - started, 1),
     }
