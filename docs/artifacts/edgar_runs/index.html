@@ -1,4 +1,4 @@
-<title>EDGAR Free-Model Replications</title>
+<title>Reproducing Tilbury et al. (2025) with a free model</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Schibsted+Grotesk:wght@500;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap">
@@ -51,14 +51,23 @@ h3 { font-size: 15px; font-weight: 500; }
 p { margin: 0; }
 .eyebrow { font: 500 12px/1.4 var(--font-data); letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-3); }
 header { display: grid; gap: 16px; }
-.lede { font-size: 19px; color: var(--fg-2); max-width: 680px; }
-.answers { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-top: 8px; }
-.answer { background: var(--panel); border-radius: 6px; padding: 16px; display: grid; gap: 6px; align-content: start; }
-.answer .verdict { font: 600 13px/1.3 var(--font-data); letter-spacing: 0.04em; text-transform: uppercase; }
-.answer .verdict.yes { color: var(--paper-ink); }
-.answer .verdict.partly { color: var(--fg-2); }
-.answer .num { font: 500 26px/1.1 var(--font-data); font-variant-numeric: tabular-nums; }
-.answer p { font-size: 15px; color: var(--fg-2); }
+.lede { font-size: 19px; color: var(--fg-2); max-width: 760px; }
+table.summary tr.group td { font: 500 12px/1.4 var(--font-data); color: var(--fg-3); letter-spacing: 0.04em; text-transform: uppercase; padding-top: 18px; }
+table.summary td:first-child { color: var(--fg-2); }
+table.summary td .sub { display: inline; margin-left: 6px; }
+.flow { display: grid; grid-template-columns: 1fr 28px 1fr 28px 1fr; align-items: stretch; }
+.flow .stage { display: grid; gap: 0; align-content: start; }
+.flow .lane { font: 500 12px/1.4 var(--font-data); color: var(--fg-3); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 8px; }
+.flow .node { background: var(--panel); border-radius: 6px; padding: 10px 12px; font-size: 15px; line-height: 1.4; }
+.flow .node .sub { display: block; font-size: 13px; color: var(--fg-2); }
+.flow .node.loop { border: 1.5px dashed var(--fg-3); background: transparent; }
+.flow .node.out { border-left: 3px solid var(--fg); }
+.flow .down { text-align: center; color: var(--fg-3); font-size: 14px; line-height: 22px; }
+.flow .across { display: flex; align-items: center; justify-content: center; color: var(--fg-3); font-size: 20px; }
+.flow .chips { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+.flow .chip { font: 12px/1.3 var(--font-data); border-radius: 4px; padding: 3px 6px; background: var(--bg); color: var(--fg-2); border: 1px solid var(--rule); }
+.flow .chip.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+@media (max-width: 760px) { .flow { grid-template-columns: 1fr; } .flow .across { transform: rotate(90deg); height: 30px; } }
 section { display: grid; gap: 14px; }
 .figlabel { font: 500 12px/1.4 var(--font-data); color: var(--fg-3); letter-spacing: 0.04em; }
 .caption { font-size: 15px; color: var(--fg-2); max-width: 720px; }
@@ -113,9 +122,9 @@ a { color: var(--ai); }
       <select id="run-pick"></select>
       <span class="eyebrow" id="run-count"></span>
     </div>
-    <h1>Does a free model rediscover EDGAR's tuning law?</h1>
+    <h1>Reproduction of “AI-discovered tuning laws explain neuronal population code geometry” with a free model</h1>
     <p class="lede" id="lede"></p>
-    <div class="answers" id="answers"></div>
+    <div class="tbl-wrap"><table class="summary" id="summary"></table></div>
   </header>
 
   <section id="across-section">
@@ -126,8 +135,37 @@ a { color: var(--ai); }
   </section>
 
   <section>
-    <h2>Side by side with the paper</h2>
-    <div class="tbl-wrap"><table id="compare"></table></div>
+    <div class="figlabel">HOW IT WORKS</div>
+    <h2>The data, the search and the tests</h2>
+    <p class="caption">EDGAR does not fit one curve to the whole recording. A language model writes an <em>equation</em> with free parameters, and those parameters are fitted separately for every neuron. Only the equation's form is learned across neurons, so it can be tested on neurons the search never saw: refit it there, then measure its error on trials the fit did not use.</p>
+    <div class="chart" id="flow"></div>
+  </section>
+
+  <section>
+    <div class="figlabel">FIGURE A · FITTING ONE NEURON</div>
+    <h2>What fitting a cell means</h2>
+    <p class="caption" id="example-cap"></p>
+    <div class="legend">
+      <span><i class="key dot" style="background:var(--fg-2)"></i>fit trial</span>
+      <span><i class="key ring" style="color:var(--fg-3)"></i>held-out trial</span>
+      <span><i class="key" style="background:var(--fg-2)"></i>fit-trial mean (30° bins)</span>
+      <span><i class="key dash" style="color:var(--fg-2)"></i>held-out mean</span>
+      <span><i class="key" style="background:var(--dg)"></i>double Gaussian</span>
+      <span><i class="key" style="background:var(--paper)"></i>paper's equation</span>
+      <span><i class="key" style="background:var(--ai)"></i>this run's winner</span>
+    </div>
+    <div class="multiples" id="example"></div>
+  </section>
+
+  <section>
+    <div class="figlabel">FIGURE B · FIT VS HELD-OUT ERROR</div>
+    <h2>Error on the trials each fit used, and on the trials it did not</h2>
+    <p class="caption" id="split-cap"></p>
+    <div class="legend">
+      <span><i class="key" style="background:var(--fg-2)"></i>fit trials</span>
+      <span><i class="key dash" style="color:var(--fg-2)"></i>held-out trials</span>
+    </div>
+    <div class="multiples" id="split"></div>
   </section>
 
   <section>
@@ -290,7 +328,7 @@ function showTip(host, x, y, html) {
 function hideTip() { tip.hidden = true; }
 const f2 = v => v.toFixed(2), f3 = v => v.toFixed(3);
 
-const CHARTS = ["search", "locked", "hist", "cells", "time", "wave-cells", "wave-size", "wave-gain", "spectrum", "validation", "ablation"];
+const CHARTS = ["flow", "example", "split", "search", "locked", "hist", "cells", "time", "wave-cells", "wave-size", "wave-gain", "spectrum", "validation", "ablation"];
 const cache = {};
 let RUNS = [];
 
@@ -305,7 +343,7 @@ fetch("runs.json").then(r => r.json()).then(index => {
 }).catch(failed);
 
 function failed() {
-  document.getElementById("answers").innerHTML = '<p class="caption">The run data did not load. Reload the page to try again.</p>';
+  document.getElementById("lede").textContent = "The run data did not load. Reload the page to try again.";
 }
 
 function load(run) {
@@ -325,7 +363,7 @@ function selectRun(id) {
     for (const c of CHARTS) document.getElementById(c).innerHTML = "";
     hideTip();
     render(D, A, N || {}, run);
-    for (const sec of ["wave-cells", "spectrum", "validation", "ablation"]) document.getElementById(sec).closest("section").hidden = !A;
+    for (const sec of ["example", "split", "wave-cells", "spectrum", "validation", "ablation"]) document.getElementById(sec).closest("section").hidden = !A;
     if (A) renderPaper(A);
     drawAcross(id);
   }).catch(failed);
@@ -335,27 +373,29 @@ function render(D, A, N, run) {
   const W = D.locked.winner, DG = D.locked.double_gaussian;
   const gain = DG.score - W.score, wid = D.winner_id;
   const counts = D.cell_counts || {};
-  document.getElementById("lede").innerHTML = `EDGAR's unchanged evolutionary search on the mouse V1 drifting-grating recording from Tilbury et al. (2025), with Gemini swapped for <code>${D.run.model}</code>. This run proposed ${D.run.proposals} programs over ${D.generations.length} generations.`;
-  const firstGen = D.first_exponent_gen;
-  document.getElementById("answers").innerHTML = `
-    <div class="answer"><span class="verdict ${gain > 0 ? "yes" : "partly"}">${gain > 0 ? "Beats" : "Does not beat"} the double Gaussian</span><span class="num">${gain > 0 ? "−" : "+"}${f2(Math.abs(gain))}</span><p>Locked-test score, ${f2(W.score)} vs ${f2(DG.score)}; MSE ${((1 - W.mse / DG.mse) * 100).toFixed(1)}% lower.</p></div>
-    <div class="answer"><span class="verdict ${D.pmin.median < 2 ? "yes" : "partly"}">Peakiness</span><span class="num">p ≈ ${f2(D.pmin.median)}</span><p>Median min(p₁, p₂) on ${D.pmin.n} locked cells. Paper: 1.20. Gaussian: 2.</p></div>
-    ${A ? `<div class="answer"><span class="verdict partly">Eigenspectrum α</span><span class="num">${f2(A.data.eligible.log.alpha)}</span><p>Recording, rcvPCA, log fit (linear ${f2(A.data.eligible.linear.alpha)}). Paper: 4.26.</p></div>` : ""}
-    <div class="answer"><span class="verdict partly">Exponent first appeared</span><span class="num">gen ${firstGen ?? "–"}</span><p>${D.exp_programs} of ${D.run.scored} scored programs fit an exponent.</p></div>`;
-
+  document.getElementById("lede").innerHTML = `The paper's search, EDGAR, run unchanged on the paper's mouse V1 recording, with the free <code>${D.run.model}</code> writing the equations instead of Gemini.`;
   const wk = A ? winnerKey(A) : null;
+  const P = A ? A.models[PAPER_NAME] : null, WM = A ? A.models[wk] : null, DGM = A ? A.models["Double Gaussian"] : null;
+  const vsDG = m => m.split_errors ? `${(100 * (m.split_errors.all.held_out / DGM.split_errors.all.held_out - 1)).toFixed(2)}%` : `${(100 * (m.mse / DGM.mse - 1)).toFixed(2)}%`;
+  const sub = t => `<span class="sub">${t}</span>`;
+  const na = "not measured";
   const rows = [
-    ["Code-writing model", "Gemini 2.0 Flash, with 2.5 Flash every third generation", D.run.model],
-    ["Programs proposed", "576", `${D.run.proposals} (${D.run.scored} scored)`],
-    ["Wall time", "about 45 min", `${D.run.hours.toFixed(2)} h`],
-    ["LLM cost", "$8.25", D.run.cost ?? "$0.00"],
-    ["Parameters per cell", "11", String(W.params)],
-    ["Peakiness, median min(p₁, p₂)", "1.20", f2(D.pmin.median) + (A && A.models[PAPER_NAME].peakiness ? ` · paper model refit here: ${f2(A.models[PAPER_NAME].peakiness.median_min_p)}` : "")],
-    ["Gain over double Gaussian", "modest, cross-validated R²", `${f2(gain)} penalized score; better on ${Math.round(D.per_cell_gain.share_better * 100)}% of cells`],
-    ["Eigenspectrum α, recording", "4.26", A ? `${f2(A.data.eligible.log.alpha)} log fit · ${f2(A.data.eligible.linear.alpha)} linear fit` : "not measured"],
-    ["Eigenspectrum α, model", "4.34 (paper model)", A ? `${f2(A.models[PAPER_NAME].pca.log.alpha)} paper model · ${f2(A.models[wk].pca.log.alpha)} winner` : "not measured"],
+    ["The search"],
+    ["Code-writing model", "Gemini 2.0 Flash, 2.5 Flash every third generation", D.run.model],
+    ["Programs proposed", "576", `${D.run.proposals}${sub(`${D.run.scored} scored, ${D.generations.length} generations`)}`],
+    ["Wall time · LLM cost", "about 45 min · $8.25", `${D.run.hours.toFixed(2)} h · ${D.run.cost ?? "$0.00"}`],
+    ["Fitted exponent p first appeared", "after several generations", `generation ${D.first_exponent_gen ?? "–"}${sub(`${D.exp_programs} of ${D.run.scored} programs fit one`)}`],
+    [`Fit to single neurons${A ? ` · ${A.cells.toLocaleString()} reliable cells, refit here` : ""}`],
+    ["Parameters per cell", "11", `${W.params}${sub("one is never used")}`],
+    ["Held-out error vs double Gaussian", A ? `${vsDG(P)}${sub("paper's equation")}` : na, A ? `${vsDG(WM)}${sub("winner")}` : na],
+    ["Median held-out R²", A ? `${f3(P.r2.median)}${sub(`double Gaussian ${f3(DGM.r2.median)}`)}` : na, A ? f3(WM.r2.median) : na],
+    ["Peakiness, median min(p₁, p₂)", `1.20${A && P.peakiness ? sub(`${f2(P.peakiness.median_min_p)} refit here`) : ""}`, `${f2(D.pmin.median)}${sub(`${Math.round(D.pmin.at_floor * 100)}% at its floor of 1`)}`],
+    ["Population geometry · eigenspectrum decay α (higher = faster decay)"],
+    ["Recording", "4.26", A ? `${f2(A.data.eligible.log.alpha)} log fit · ${f2(A.data.eligible.linear.alpha)} linear fit${sub("same data, measured here")}` : na],
+    ["Fitted curves", `4.34${A ? sub(`paper's equation; ${f2(P.pca.log.alpha)} refit here`) : ""}`, A ? `${f2(WM.pca.log.alpha)}${sub("winner")}` : na],
   ];
-  document.getElementById("compare").innerHTML = `<thead><tr><th></th><th>Tilbury et al. (2025)</th><th>This run</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("")}</tbody>`;
+  document.getElementById("summary").innerHTML = `<thead><tr><th></th><th>Tilbury et al. (2025)</th><th>This run</th></tr></thead><tbody>${rows.map(r => r.length === 1 ? `<tr class="group"><td colspan="3">${r[0]}</td></tr>` : `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("")}</tbody>`;
+  drawFlow(D, A);
 
   document.getElementById("locked-cap").textContent = `The top ${D.candidates.length - 2} programs by discovery loss competed on ${counts.selection ?? "the"} selection cells; only the winner and the two seeds were then scored once on ${counts.locked_test ?? "the"} locked test cells.`;
   document.getElementById("eq-title").textContent = `Program ${wid}${N.equation_title ? ": " + N.equation_title : ""}`;
@@ -387,6 +427,37 @@ const ACROSS = [
   ["wave_gain", "R² gain from the wave (median)", v => v.toFixed(4), null],
   ["hours", "wall hours", v => v.toFixed(2), 0.75],
 ];
+
+function drawFlow(D, A) {
+  const c = D.cell_counts || {}, n = v => (v ?? 0).toLocaleString();
+  const total = (c.discovery ?? 0) + (c.selection ?? 0) + (c.locked_test ?? 0);
+  const chips = on => `<div class="chips">${[["discovery", c.discovery], ["selection", c.selection], ["locked test", c.locked_test]].map(([k, v]) => `<span class="chip${on === k ? " on" : ""}">${k} ${n(v)}</span>`).join("")}</div>`;
+  const node = (main, sub, cls = "") => `<div class="node ${cls}">${main}${sub ? `<span class="sub">${sub}</span>` : ""}</div>`;
+  const down = (label = "↓") => `<div class="down">${label}</div>`;
+  const stage = (lane, parts) => `<div class="stage"><div class="lane">${lane}</div>${parts.join(down())}</div>`;
+  document.getElementById("flow").innerHTML = `<div class="flow">
+    ${stage("1 · Data", [
+      node("Mouse V1 recording", `Two-photon imaging while drifting gratings moved in random directions; one response per neuron per trial.${A ? ` ${n(A.all_cells_count)} responsive neurons.` : ""}`),
+      node(`Keep ${n(total)} reliable neurons`, "Active on over 40% of trials and tuned to direction."),
+      node("Split the neurons", "The search sees only discovery neurons." + chips()),
+      node("Split each neuron's trials in half", "Fit half: parameters are fitted here. Held-out half: error is measured here."),
+    ])}
+    <div class="across" aria-hidden="true">→</div>
+    ${stage("2 · Search, discovery neurons only", [
+      node(`${D.run.model} writes a candidate`, "An equation for firing rate vs direction, f(θ; parameters), plus code that guesses starting parameters."),
+      node("Fit it to every discovery neuron", "Each neuron gets its own parameters, fitted on its fit trials."),
+      node("Score it", "Loss = 10 × held-out error + 0.01 × parameters per neuron. Extra parameters must earn their keep." + chips("discovery")),
+      node(`Repeat for ${D.generations.length} generations`, `The best candidates so far go back into the prompt. ${n(D.run.proposals)} candidates proposed, ${n(D.run.scored)} ran.`, "loop"),
+    ])}
+    <div class="across" aria-hidden="true">→</div>
+    ${stage("3 · Pick and test", [
+      node(`Take the top ${D.candidates.length - 2} by discovery loss`),
+      node("Refit and score on selection neurons", "The lowest score becomes the winner." + chips("selection")),
+      node("Score once on locked test neurons", "Against the two seed equations. Nothing is chosen here, so this number is unbiased." + chips("locked test")),
+      node("This page: refit and compare", `The winner, the paper's equation and the double Gaussian, refitted to all ${n(total)} neurons. Figures A and B, and the eigenspectra.`, "out"),
+    ])}
+  </div>`;
+}
 
 function drawAcross(selected) {
   const host = document.getElementById("across"); host.innerHTML = "";
@@ -597,6 +668,8 @@ const PAPER_NAME = "AI model", WAVE_NAME = "AI model + wave";
 const winnerKey = A => Object.keys(A.models).find(k => k.startsWith("EDGAR winner"));
 
 function renderPaper(A) {
+  drawExample(A);
+  drawSplit(A);
   drawWaveCells(A);
   drawWaveHists(A);
   drawSpectrum(A, "eligible");
@@ -717,6 +790,106 @@ function drawAblation(A) {
     t.addEventListener("pointerenter", () => showTip(host, x1, y, `${label}<br>median R² ${f3(e.r2.median)} · mean gain ${e.r2.gain_over_double_gaussian.mean.toFixed(4)}`));
     t.addEventListener("pointerleave", hideTip);
   });
+}
+
+const SHOWN = A => [["Double Gaussian", "double Gaussian", "var(--dg)"], [PAPER_NAME, "paper's equation", "var(--paper)"], [winnerKey(A), "this run's winner", "var(--ai)"]];
+function binMeans(xs, ys, width = 30) {
+  const n = 360 / width, sum = Array(n).fill(0), cnt = Array(n).fill(0);
+  xs.forEach((x, i) => { const b = Math.min(n - 1, Math.floor((x * 180 / Math.PI) / width)); sum[b] += ys[i]; cnt[b]++; });
+  const pts = sum.map((v, b) => [b * width + width / 2, cnt[b] ? v / cnt[b] : null]).filter(p => p[1] !== null);
+  return [[pts[pts.length - 1][0] - 360, pts[pts.length - 1][1]], ...pts, [pts[0][0] + 360, pts[0][1]]];
+}
+function drawExample(A) {
+  const host = document.getElementById("example"); host.innerHTML = "";
+  const E = A.example_cell;
+  if (!E) { host.closest("section").hidden = true; return; }
+  host.closest("section").hidden = false;
+  document.getElementById("example-cap").textContent = `One neuron from the locked test set (a typical well-tuned cell: 90th percentile of held-out R² under the paper's equation). Each dot is one trial. Every model is fitted to the filled dots only, then judged on how close it comes to the hollow ones. ${E.fit_trials.x.length.toLocaleString()} trials each side. Responses are scaled so each neuron's response vector has norm 100.`;
+  const grid = E.grid.map(r => r * 180 / Math.PI);
+  const fitMean = binMeans(E.fit_trials.x, E.fit_trials.y), heldMean = binMeans(E.held_out_trials.x, E.held_out_trials.y);
+  const all = [...E.fit_trials.y, ...E.held_out_trials.y];
+  const sorted = [...all].sort((a, b) => a - b), cap = sorted[Math.floor(0.99 * sorted.length)];
+  const ymax = Math.max(cap, ...Object.values(E.curves).flat()) * 1.05, ymin = Math.min(0, ...Object.values(E.curves).flat());
+  const w = 320, h = 230, m = { l: 34, r: 8, t: 8, b: 22 };
+  const X = scale(0, 360, m.l, w - m.r), Y = scale(ymin, ymax, h - m.b, m.t);
+  const path = pts => pts.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(Math.min(p[1], ymax)).toFixed(1)}`).join("");
+  for (const [key, label, color] of SHOWN(A)) {
+    const box = document.createElement("div"); box.className = "cell";
+    box.innerHTML = `<h3>${label}</h3><div class="meta">held-out R² ${f3(E.r2[key])} · ${A.models[key].parameters} parameters</div>`;
+    const ch = document.createElement("div"); ch.className = "chart"; box.appendChild(ch); host.appendChild(box);
+    const sv = svg(ch, w, h);
+    el("clipPath", { id: `clip-${label.length}` }, sv).appendChild(el("rect", { x: m.l, y: m.t, width: w - m.l - m.r, height: h - m.t - m.b }));
+    const st = ymax > 20 ? 10 : ymax > 8 ? 4 : 2;
+    for (let v = Math.ceil(ymin / st) * st; v <= ymax; v += st) { el("line", { x1: m.l, x2: w - m.r, y1: Y(v), y2: Y(v), stroke: v === 0 ? "var(--fg-3)" : "var(--grid)" }, sv); txt(sv, m.l - 5, Y(v) + 4, String(v), { "text-anchor": "end", style: "font-size:10px" }); }
+    for (const a of [0, 90, 180, 270, 360]) txt(sv, X(a), h - m.b + 15, a + "°", { "text-anchor": "middle", style: "font-size:10px" });
+    const g = el("g", { "clip-path": `url(#clip-${label.length})` }, sv);
+    E.held_out_trials.x.forEach((x, i) => el("circle", { cx: X(x * 180 / Math.PI), cy: Y(Math.min(E.held_out_trials.y[i], ymax)), r: 1.8, fill: "none", stroke: "var(--fg-3)", "stroke-width": 0.8, opacity: 0.6 }, g));
+    E.fit_trials.x.forEach((x, i) => el("circle", { cx: X(x * 180 / Math.PI), cy: Y(Math.min(E.fit_trials.y[i], ymax)), r: 1.6, fill: "var(--fg-2)", opacity: 0.45 }, g));
+    el("path", { d: path(fitMean), fill: "none", stroke: "var(--fg-2)", "stroke-width": 1.5 }, g);
+    el("path", { d: path(heldMean), fill: "none", stroke: "var(--fg-2)", "stroke-width": 1.5, "stroke-dasharray": "5 4" }, g);
+    el("path", { d: path(E.curves[key].map((v, i) => [grid[i], v])), fill: "none", stroke: color, "stroke-width": 2.5, "stroke-linejoin": "round" }, g);
+    const cross = el("line", { y1: m.t, y2: h - m.b, stroke: "var(--fg-3)", visibility: "hidden" }, sv);
+    const hit = el("rect", { x: m.l, y: m.t, width: w - m.l - m.r, height: h - m.t - m.b, fill: "transparent" }, sv);
+    hit.addEventListener("pointermove", e => {
+      const pt = sv.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+      const q = pt.matrixTransform(sv.getScreenCTM().inverse());
+      const i = Math.max(0, Math.min(grid.length - 1, Math.round(X.inv(q.x) / 2)));
+      cross.setAttribute("x1", X(grid[i])); cross.setAttribute("x2", X(grid[i])); cross.setAttribute("visibility", "visible");
+      showTip(ch, X(grid[i]), m.t + 4, `${Math.round(grid[i])}° · ${label} ${f2(E.curves[key][i])}`);
+    });
+    hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+  }
+}
+
+const GROUPS = [["discovery", "discovery"], ["selection", "selection"], ["locked_test", "locked test"]];
+function lineGroups(host, series, opts) {
+  const w = 320, h = opts.h || 220, m = { l: 46, r: 12, t: 12, b: 26 };
+  const sv = svg(host, w, h);
+  const X = i => m.l + 24 + i * (w - m.l - m.r - 48) / (GROUPS.length - 1);
+  const Y = scale(opts.lo, opts.hi, h - m.b, m.t);
+  for (const v of opts.ticks) { el("line", { x1: m.l, x2: w - m.r, y1: Y(v), y2: Y(v), stroke: v === 0 && opts.zero ? "var(--fg-3)" : "var(--grid)" }, sv); txt(sv, m.l - 6, Y(v) + 4, opts.fmt(v), { "text-anchor": "end", style: "font-size:10px" }); }
+  GROUPS.forEach(([, label], i) => txt(sv, X(i), h - m.b + 16, label, { "text-anchor": "middle", style: "font-size:10px" }));
+  for (const sr of series) {
+    if (sr.err) sr.values.forEach((v, i) => el("line", { x1: X(i), x2: X(i), y1: Y(v - sr.err[i]), y2: Y(v + sr.err[i]), stroke: sr.color, "stroke-width": 1.2, opacity: 0.5 }, sv));
+    el("path", { d: sr.values.map((v, i) => `${i ? "L" : "M"}${X(i)},${Y(v).toFixed(1)}`).join(""), fill: "none", stroke: sr.color, "stroke-width": 2, ...(sr.dash ? { "stroke-dasharray": "5 4" } : {}) }, sv);
+    sr.values.forEach((v, i) => {
+      const dot = el("circle", { cx: X(i), cy: Y(v), r: 4.5, fill: sr.dash ? "var(--bg)" : sr.color, stroke: sr.dash ? sr.color : "var(--bg)", "stroke-width": 2 }, sv);
+      const hit = el("circle", { cx: X(i), cy: Y(v), r: 12, fill: "transparent" }, sv);
+      hit.addEventListener("pointerenter", () => { dot.setAttribute("r", 6); showTip(host, X(i), Y(v), sr.tip(i)); });
+      hit.addEventListener("pointerleave", () => { dot.setAttribute("r", 4.5); hideTip(); });
+    });
+    if (sr.label) txt(sv, w - m.r, Y(sr.values[sr.values.length - 1]) + (sr.labelDy || 0), sr.label, { "text-anchor": "end", class: "lbl" });
+  }
+}
+function drawSplit(A) {
+  const host = document.getElementById("split"); host.innerHTML = "";
+  const shown = SHOWN(A), DGE = A.models["Double Gaussian"].split_errors;
+  if (!DGE) { host.closest("section").hidden = true; return; }
+  host.closest("section").hidden = false;
+  const vals = shown.flatMap(([k]) => GROUPS.flatMap(([g]) => [A.models[k].split_errors[g].fit, A.models[k].split_errors[g].held_out]));
+  const lo = Math.floor(Math.min(...vals) * 20 - 1) / 20, hi = Math.ceil(Math.max(...vals) * 20 + 1) / 20;
+  const ticks = []; for (let v = lo; v <= hi + 1e-9; v += 0.05) ticks.push(+v.toFixed(2));
+  const pct = (k, g) => 100 * (A.models[k].split_errors[g].held_out / DGE[g].held_out - 1);
+  const gapAll = k => A.models[k].split_errors.all.held_out - A.models[k].split_errors.all.fit;
+  document.getElementById("split-cap").innerHTML = `Mean squared error per trial, averaged over neurons, for each group of neurons from the diagram above. Solid: the fit trials each neuron's parameters were fitted on. Dashed: that neuron's held-out trials. Error bars are ±1 standard error across neurons. The gap between the lines is the price of fitting noise: ${f3(gapAll(shown[0][0]))} for the double Gaussian, ${f3(gapAll(shown[1][0]))} for the paper's equation and ${f3(gapAll(shown[2][0]))} for the winner. The y-axis does not start at zero.`;
+  for (const [k, label, color] of shown) {
+    const E = A.models[k].split_errors;
+    const box = document.createElement("div"); box.className = "cell";
+    box.innerHTML = `<h3>${label}</h3><div class="meta">${A.models[k].parameters} parameters · all neurons: fit ${f3(E.all.fit)}, held-out ${f3(E.all.held_out)}</div>`;
+    const ch = document.createElement("div"); ch.className = "chart"; box.appendChild(ch); host.appendChild(box);
+    lineGroups(ch, [
+      { values: GROUPS.map(([g]) => E[g].fit), err: GROUPS.map(([g]) => E[g].fit_sem), color, tip: i => `${label} · ${GROUPS[i][1]} · fit trials ${f3(E[GROUPS[i][0]].fit)} (${E[GROUPS[i][0]].cells} neurons)` },
+      { values: GROUPS.map(([g]) => E[g].held_out), err: GROUPS.map(([g]) => E[g].held_out_sem), color, dash: true, tip: i => `${label} · ${GROUPS[i][1]} · held-out trials ${f3(E[GROUPS[i][0]].held_out)} (${E[GROUPS[i][0]].cells} neurons)` },
+    ], { lo, hi, ticks, fmt: v => v.toFixed(2) });
+  }
+  const box = document.createElement("div"); box.className = "cell";
+  box.innerHTML = `<h3>held-out error vs double Gaussian</h3><div class="meta">same neurons, same trials; below 0 is better</div>`;
+  const ch = document.createElement("div"); ch.className = "chart"; box.appendChild(ch); host.appendChild(box);
+  const rel = shown.slice(1).map(([k, label, color]) => ({ values: GROUPS.map(([g]) => pct(k, g)), color, label: label.replace("this run's ", ""), tip: i => `${label} · ${GROUPS[i][1]} · ${pct(k, GROUPS[i][0]).toFixed(2)}% vs double Gaussian` }));
+  const rv = rel.flatMap(r => r.values), rlo = Math.min(-1.5, Math.floor(Math.min(...rv) * 2) / 2 - 0.25);
+  const rt = []; for (let v = 0; v >= rlo; v -= 0.5) rt.push(v);
+  rel[0].labelDy = rel[0].values[2] > rel[1].values[2] ? -8 : 14; rel[1].labelDy = rel[0].labelDy > 0 ? -8 : 14;
+  lineGroups(ch, rel, { lo: rlo, hi: 0.25, ticks: rt, zero: true, fmt: v => (v === 0 ? "0" : v.toFixed(1)) + "%" });
 }
 
 function drawWaveCells(A) {

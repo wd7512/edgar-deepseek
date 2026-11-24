@@ -22,6 +22,7 @@ import pandas as pd
 
 from edgar_study import fitting, geometry, paper_models
 from edgar_study.datasets import load_dataset, prepare
+from edgar_study.split_errors import split_errors
 from edgar_study.upstream import combined_file, import_upstream, score_program
 
 log = logging.getLogger("paper_analysis")
@@ -199,6 +200,33 @@ def wave_analysis(models, fitted, results, winner_id, x, y, n_examples=4):
     }
 
 
+def example_cell(models, fitted, results, groups, x, y, fit_trials, held_out):
+    """One locked-test cell's trials, split into fit and held-out halves, with three models' fits."""
+    locked = groups["locked_test"]
+    scores = results["AI model"]["r2"][locked]
+    row = int(locked[np.argsort(scores)[int(0.9 * len(scores))]])
+    grid = np.linspace(0, 2 * np.pi, 181)
+    shown = ["Double Gaussian", "AI model", next(k for k in models if k.startswith("EDGAR winner"))]
+    observed, angles = np.asarray(y[row]), np.asarray(x[row])
+    return {
+        "row": row,
+        "grid": grid.round(4).tolist(),
+        "fit_trials": {
+            "x": angles[fit_trials].round(4).tolist(),
+            "y": observed[fit_trials].round(3).tolist(),
+        },
+        "held_out_trials": {
+            "x": angles[held_out].round(4).tolist(),
+            "y": observed[held_out].round(3).tolist(),
+        },
+        "curves": {
+            name: predict(models[name][0], fitted[name][row : row + 1], grid)[0].round(3).tolist()
+            for name in shown
+        },
+        "r2": {name: float(results[name]["r2"][row]) for name in shown},
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--run", type=Path, required=True)
@@ -217,6 +245,8 @@ def main():
     cells = indices["eligible_cell_ids"]
     scale = 100 / np.linalg.norm(response[cells[:, None], indices["recording_trial_ids"]], axis=1)
     held_out = indices["score_trial_columns"]
+    fit_trials = indices["fit_trial_columns"]
+    split_groups = {**groups, "all": np.arange(len(cells))}
 
     winner_id, winner_model, winner_estimator = winner(args.run.resolve(), utils)
     models = {
@@ -250,6 +280,9 @@ def main():
         residual = observed - predict(model, params, x[:, held_out])
         total = np.sum((observed - observed.mean(axis=1, keepdims=True)) ** 2, axis=1)
         entry["r2"] = 1 - np.sum(residual**2, axis=1) / total
+        entry["split_errors"] = split_errors(
+            np.asarray(y), predict(model, params, x), fit_trials, held_out, split_groups
+        )
         if name == "AI model":
             entry["example_curves"] = curves[:: max(1, len(cells) // 40)][:40].round(3).tolist()
         results[name] = entry
@@ -257,6 +290,7 @@ def main():
         describe(name, entry, time.time() - fit_started)
 
     wave = wave_analysis(models, fitted, results, winner_id, x, y)
+    example = example_cell(models, fitted, results, groups, x, y, fit_trials, held_out)
 
     baseline_r2 = results["Double Gaussian"]["r2"]
     for entry in results.values():
@@ -293,6 +327,7 @@ def main():
         "models": results,
         "all_cells_models": all_cells,
         "wave": wave,
+        "example_cell": example,
         "all_cells_count": int(len(every)),
         "seconds": round(time.time() - started, 1),
     }

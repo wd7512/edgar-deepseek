@@ -3,3 +3,5 @@ Added the population analyses from Tilbury et al. (2025):
 - `edgar_study.paper_models`: the paper's winning model and parameter estimator, its Fig. 3e ablations, and the paper model plus this run's one-cycle wave.
 - `scripts/paper_analysis/`: repeats the analyses on a finished run.
 - `docs/artifacts/edgar_runs/`: a results page that takes any number of runs, indexed by `edgar_study.run_index`.
+- `edgar_study.split_errors`: fit-trial and held-out-trial error for each cell group (discovery, selection, locked test). The paper analysis records it for every model, plus one example cell's trials and fits.
+- The results page opens with a single summary table against the paper and a diagram of the data split and search, then shows how one neuron is fitted and the fit vs held-out error of the paper's equation and the winner.
