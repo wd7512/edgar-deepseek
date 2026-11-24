@@ -214,6 +214,14 @@ def main():
     rescore.add_argument("--top", type=int, default=10)
     rescore.set_defaults(func=lambda args: _load("rescore", "rescore")(args))
 
+    recover = commands.add_parser(
+        "recover", help="Rebuild the program databases of a run that stopped early from its log and census."
+    )
+    recover.add_argument("--run", type=Path, required=True)
+    recover.set_defaults(
+        func=lambda args: print(f"Recovered {_load('recover', 'recover')(args.run)} programs")
+    )
+
     report = commands.add_parser("report", help="Summarise a run and plot best-so-far discovery loss.")
     report.add_argument("--run", type=Path, required=True)
     report.set_defaults(func=lambda args: _load("report", "report")(args))
