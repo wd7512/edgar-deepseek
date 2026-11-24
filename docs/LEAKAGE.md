@@ -27,3 +27,7 @@ The paid run used no image reader, read candidates from the island databases (re
 | Direct recall probe | Not run: it is a paid call and the run had already spent past its cap. |
 
 So nothing in the transcript shows recall, but unlike `hy4-flash-free` this model was not asked directly, and a model trained after November 2025 could know the paper. Treat the match as unconfirmed until that probe is run.
+
+## hy4-flash-free, 24 generations (run 20261124-005016-b0f216)
+
+Same model, prompts and pipeline as run 219bfc, with the fixes above in place from the start (island candidate pool, no image reader). None of its 942 scored programs mentions the paper, EDGAR, bioRxiv or the literature; as before, the exponent appears in generation 0 with reasons drawn from the plotted neurons.

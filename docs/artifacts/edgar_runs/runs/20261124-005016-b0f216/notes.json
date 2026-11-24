@@ -1,0 +1,13 @@
+{
+ "equation_title": "the paper's equation with an exponent on each side of each peak",
+ "equation_caption": "Both add two peaks to a baseline, each a generalized Gaussian with different widths on its left and right. Blue marks what this run's winner does differently: each side of each peak has its own exponent, so a peak can be sharp on one side and shouldered on the other; the second peak sits opposite the first, give or take an offset δ, instead of anywhere; and the curve is clipped at zero. That trades the paper's free second centre for four exponents, 13 parameters in all.",
+ "equation_html": "<div><span class=\"term\">Paper's equation (11 parameters):</span>&ensp;<span class=\"term\">f(θ) = b + A₁ exp[−½ (|θ−φ₁| / σ₁±)<sup>p₁</sup>] + A₂ exp[−½ (|θ−φ₂| / σ₂±)<sup>p₂</sup>]</span></div><div><span class=\"term\">This run's winner (13 parameters):</span>&ensp;<span class=\"term\">f(θ) = max{0, b + A₁ exp[−½ (|d₁| / σ₁±)<sup class=\"new\">p₁±</sup>] + A₂ exp[−½ (|d₂| / σ₂±)<sup class=\"new\">p₂±</sup>]}</span>, <span class=\"term\">d₁ = θ − φ, d₂ = θ − φ − π <span class=\"new\">− δ</span></span></div>",
+ "unused_parameters": [],
+ "caveats": [
+  "<strong>Twice as long, no better.</strong> This run had 24 generations instead of 12, with the same model and settings. Its winner came from generation 15, and on the locked-test neurons it scores 28.331 against 28.322 for the 12-generation winner: a tie within noise. Its held-out error is 0.99% below the double Gaussian's, against 1.01% and 0.84% for the paper's equation.",
+  "<strong>An exponent from the first generation.</strong> As in the 12-generation run, a fitted exponent appeared in generation 0 and in 915 of 942 candidates. The same leakage checks apply (docs/LEAKAGE.md): the model did not know the paper when asked, and its notes credit each term to the plotted neurons.",
+  "<strong>Peakiness is measured on the sharper side.</strong> Each peak has a left and a right exponent; the figures use the lower of the two, which sets the shape of the tip. That makes this winner look peakier than the others: median min(p₁, p₂) 0.66 over all 2,110 reliable neurons, with 30% of locked-test neurons at the floor of 0.5.",
+  "<strong>α does not match the paper's numbers.</strong> The winner gives α ≈ 3.5 (log fit), between the paper's equation refitted here (3.4) and the double Gaussian (4.4). See the 12-generation run's caveat on why the paper's own values are not reproduced.",
+  "<strong>Different fitter.</strong> Candidates are fitted with bounded Levenberg–Marquardt instead of upstream's Adam; scores agree to within about 0.7%."
+ ]
+}

@@ -377,7 +377,7 @@ function render(D, A, N, run) {
   const counts = D.cell_counts || {};
   UNUSED = (N.unused_parameters || []).length;
   const free = /free/.test(D.run.model), stop = D.run.stopped_early;
-  document.getElementById("lede").innerHTML = `The paper's search, EDGAR, run unchanged on the paper's mouse V1 recording, with the ${free ? "free" : "paid"} <code>${D.run.model}</code> writing the equations instead of Gemini.` +
+  document.getElementById("lede").innerHTML = `The paper's search, EDGAR, run unchanged on the paper's mouse V1 recording, with the ${free ? "free" : "paid"} <code>${D.run.model}</code> writing the equations instead of Gemini${stop ? "" : `, for ${D.run.iterations ?? 12} generations`}.` +
     (stop ? ` It reached its $9.50 spend cap after ${stop.generations_completed} of ${D.run.iterations ?? 12} generations; the winner is picked from the ${stop.programs} programs it had scored by then.` : "");
   const wk = A ? winnerKey(A) : null;
   const P = A ? A.models[PAPER_NAME] : null, WM = A ? A.models[wk] : null, DGM = A ? A.models["Double Gaussian"] : null;
@@ -629,7 +629,7 @@ function drawHist(D, A, mode) {
   txt(s, (m.l + w - m.r) / 2, h - 4, mode === "min" ? "min(p₁, p₂)  ·  lower = sharper peak" : "p of the larger peak", { "text-anchor": "middle", class: "lbl" });
   txt(s, 14, Y(top / 2), "share of neurons", { transform: `rotate(-90 14 ${Y(top / 2)})`, "text-anchor": "middle", class: "lbl" });
   shares.forEach((c, i) => {
-    if (!c) return;
+    if (!c || edges[i] >= xhi) return;
     const x0 = X(edges[i]) + 1, x1 = X(edges[i + 1]) - 1, y = Y(c), r = Math.min(4, (x1 - x0) / 2);
     el("path", { d: `M${x0},${Y(0)}V${y + r}Q${x0},${y} ${x0 + r},${y}H${x1 - r}Q${x1},${y} ${x1},${y + r}V${Y(0)}Z`, fill: "var(--ai)", "fill-opacity": 0.85 }, s);
     const t = el("rect", { x: x0, y: m.t, width: x1 - x0, height: Y(0) - m.t, fill: "transparent" }, s);
