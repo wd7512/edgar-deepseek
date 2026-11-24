@@ -10,8 +10,10 @@ import math
 import re
 from typing import NamedTuple
 
-MAXSIZE = 30
-MAX_DEPTH = 10
+import numpy as np
+
+MAXSIZE = 45
+MAX_DEPTH = 14
 MAX_PARAMETERS = 16
 
 
@@ -28,6 +30,21 @@ KINDS = {
     "width": Kind((0.01, 10.0), 1.0),
     "exponent": Kind((0.1, 8.0), 2.0),
     "free": Kind((-100.0, 100.0), 1.0),
+    "shift": Kind((-100.0, 100.0), 0.0),
+}
+NEUTRAL = {"add": "shift", "sub": "shift", "mul": "free", "div": "free"}
+PROMOTABLE = {0.0: "shift", 1.0: "free", 2.0: "exponent"}
+MOVES = {
+    "point": 0.18,
+    "insert": 0.22,
+    "promote": 0.10,
+    "leaf": 0.10,
+    "subtree": 0.10,
+    "shrink": 0.10,
+    "hoist": 0.03,
+    "share": 0.05,
+    "split": 0.05,
+    "retag": 0.07,
 }
 RANDOM_KINDS = ("free", "level", "scale", "pref", "width", "exponent")
 CONSTANTS = (0.5, 1.0, 2.0, math.pi, -0.5)
@@ -58,7 +75,7 @@ def _param(kind, k=1):
 
 def _gaussian(offset):
     distance = ("abs", ("wrap", ("sub", THETA, offset)))
-    return ("exp", ("mul", ("const", -0.5), ("square", ("div", distance, _param("width")))))
+    return ("exp", ("mul", ("const", -0.5), ("pow", ("div", distance, _param("width")), ("const", 2.0))))
 
 
 SINGLE_GAUSSIAN = ("add", _param("level"), ("mul", _param("scale"), _gaussian(_param("pref"))))
@@ -167,43 +184,51 @@ def _fresh(tree, tag):
     return tree
 
 
-def _mutate_once(rng, tree):
+def _mutate_once(rng, tree, moves):
     spots = nodes(tree)
     path, node = spots[rng.integers(len(spots))]
-    move = rng.integers(8)
-    if move == 0:
+    weights = np.array([MOVES[m] for m in moves])
+    move = moves[rng.choice(len(moves), p=weights / weights.sum())]
+    if move == "point":
         arity = OPS[node[0]][0] if node[0] in OPS else 0
         new = (str(rng.choice(BY_ARITY[arity])), *node[1:]) if arity else random_leaf(rng)
-    elif move == 1:
-        new = _grow(rng, 3)
-    elif move == 2:
+    elif move == "insert":
+        op = str(rng.choice(list(NEUTRAL)))
+        new = (op, node, ("param", f"new_{rng.integers(1 << 30)}", NEUTRAL[op]))
+    elif move == "promote":
+        constants = [(p, n) for p, n in spots if n[0] == "const" and n[1] in PROMOTABLE]
+        if not constants:
+            return tree
+        path, node = constants[rng.integers(len(constants))]
+        new = ("param", f"new_{rng.integers(1 << 30)}", PROMOTABLE[node[1]])
+    elif move == "leaf":
+        new = random_leaf(rng)
+    elif move == "subtree":
+        new = _grow(rng, 2)
+    elif move == "hoist":
         inner = [n for _, n in nodes(node) if n[0] in OPS and uses_theta(n)]
         if not inner:
             return tree
         return inner[rng.integers(len(inner))]
-    elif move == 3:
-        op = str(rng.choice(["add", "sub", "mul", "div", "pow", "exp", "cos", "abs", "square", "wrap"]))
-        new = (op, node, random_leaf(rng)) if OPS[op][0] == 2 else (op, node)
-    elif move == 4:
+    elif move == "shrink":
         if node[0] not in OPS:
             return tree
         new = node[1 + rng.integers(len(node) - 1)]
-    elif move == 5:
+    elif move == "share":
         if node[0] != "param":
             return tree
         same = [name for name, kind in parameters(tree) if kind == node[2] and name != node[1]]
         if not same:
             return tree
         new = ("param", str(rng.choice(same)), node[2])
-    elif move == 6:
+    elif move == "split":
         if node[0] != "param":
             return tree
         new = ("param", f"split_{rng.integers(1 << 30)}", node[2])
     else:
         if node[0] != "param":
             return tree
-        kind = str(rng.choice(RANDOM_KINDS))
-        return canonical(_retag(tree, node[1], kind))
+        return canonical(_retag(tree, node[1], str(rng.choice(RANDOM_KINDS))))
     return replace(tree, path, new)
 
 
@@ -215,11 +240,12 @@ def _retag(tree, name, kind):
     return tree
 
 
-def mutate(rng, tree, steps=1):
-    """Apply `steps` random edits, each retried until the result is valid; the output is canonical."""
+def mutate(rng, tree, steps=1, moves=tuple(MOVES)):
+    """Apply `steps` random edits drawn from `moves` (weighted by MOVES), each retried until the result
+    is valid; the output is canonical. `insert` and `promote` are neutral: the child starts as the parent."""
     for _ in range(steps):
         for _ in range(30):
-            candidate = canonical(_mutate_once(rng, tree))
+            candidate = canonical(_mutate_once(rng, tree, moves))
             if valid(candidate) and candidate != tree:
                 tree = candidate
                 break
@@ -322,6 +348,7 @@ def parameter_estimator(theta, spike_counts):
         "width": 2 * np.pi * np.sum(above) / n_bins / 2.3548,
         "exponent": 2.0,
         "free": 1.0,
+        "shift": 0.0,
     }}
     kinds = {kinds!r}
     low = np.array({lows!r})

@@ -155,3 +155,20 @@ def test_from_pysr_reads_a_template_equation_and_marks_phase_parameters():
     values = {"pref_1": 1.3, "free_1": 0.4}
     expected = np.exp(np.cos(1.3 + GRID) + 0.4 - 0.22668725) + 0.5
     assert np.allclose(model_np(GRID, *[values[n] for n in names]), expected)
+
+
+@pytest.mark.parametrize("move", ["insert", "promote"])
+def test_neutral_moves_leave_the_curve_unchanged_at_the_new_parameters_defaults(move):
+    parent = symbolic.SEEDS[1]
+    values = {"level_1": 0.3, "scale_1": 2.0, "pref_1": 1.1, "width_1": 0.5, "opposite_1": 0.7}
+    parent_np, _ = compile_pair(parent)
+    expected = parent_np(GRID, *[values[n] for n, _ in symbolic.parameters(parent)])
+    rng = np.random.default_rng(0)
+    changed = 0
+    for _ in range(30):
+        child = symbolic.mutate(rng, parent, steps=1, moves=(move,))
+        child_np, _ = compile_pair(child)
+        args = [values.get(n, symbolic.KINDS[k].default) for n, k in symbolic.parameters(child)]
+        assert np.allclose(child_np(GRID, *args), expected, atol=1e-9), symbolic.to_infix(child)
+        changed += child != parent
+    assert changed > 20

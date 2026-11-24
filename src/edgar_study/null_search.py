@@ -52,11 +52,13 @@ class Proposer:
         return namespace[name]
 
     def child(self, parents, mode):
+        """A new tree from parents ordered worst first: usually the better parent, sometimes crossed with
+        the other, then one or two mutations while exploring and one while exploiting."""
         trees = [self.trees[code] for code in parents]
         for _ in range(10):
-            base, donor = (trees[0], trees[-1]) if self.rng.random() < 0.5 else (trees[-1], trees[0])
-            tree = symbolic.crossover(self.rng, base, donor) if self.rng.random() < 0.5 else base
-            steps = int(self.rng.integers(1, 4)) if mode == "explore" else 1
+            base, donor = (trees[-1], trees[0]) if self.rng.random() < 0.75 else (trees[0], trees[-1])
+            tree = symbolic.crossover(self.rng, base, donor) if self.rng.random() < 0.3 else base
+            steps = int(self.rng.integers(1, 3)) if mode == "explore" else 1
             tree = symbolic.mutate(self.rng, tree, steps=steps)
             if symbolic.to_numpy_source(tree) not in self.trees:
                 break
