@@ -17,7 +17,7 @@ The generation-0 docstring credits the exponent to the image: "lobe-specific gen
 
 ## DeepSeek V4.1 Flash (run 20261124-005036-fa1fb9)
 
-The paid run used no image reader, read candidates from the island databases (rebuilt with `edgar recover` after the spend cap stopped it) and so has none of the leaks fixed above. Its winner has exactly the paper's 11-parameter form, so we checked what the model wrote:
+The paid run used no image reader, read candidates from the island databases (rebuilt with `edgar recover` after the spend cap stopped it) and so has none of the leaks fixed above. The rebuilt pool holds every program it had scored, not only the ones that survived on the islands; all of them were scored on discovery cells only. Its winner has exactly the paper's 11-parameter form, so we checked what the model wrote:
 
 | Check | Finding |
 | --- | --- |

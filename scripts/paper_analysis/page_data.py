@@ -14,7 +14,7 @@ import numpy as np
 
 from edgar_study import fitting
 from edgar_study.datasets import load_dataset, prepare
-from edgar_study.exponents import clip_bounds, exponent_pair, fitted_exponents
+from edgar_study.exponents import amplitude_pair, clip_bounds, exponent_pair, fitted_exponents
 from edgar_study.upstream import combined_file, import_upstream, score_program, searched_programs
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -40,7 +40,8 @@ programs = [
 ]
 
 resp, ang, _ = load_dataset(args.dataset, utils.extract_stimulus_related_response)
-x, y, groups, _ = prepare(resp, ang, "strict-holdout-v1")
+x, y, groups, indices = prepare(resp, ang, "strict-holdout-v1")
+held = indices["score_trial_columns"]
 cells = groups["locked_test"]
 w = res["winner"]
 wm = utils.str_to_func(w["jax_code"], "neuron_model")
@@ -62,18 +63,22 @@ if exponents is None:
 pc1, pc2 = exponents
 low, high = clip_bounds(w["jax_code"], exponent_pair(names)[0])
 low, high = (low, high) if np.isfinite(low) and np.isfinite(high) else (0.0, 4.0)
-a2 = wp[:, names.index("amplitude_2")]
+amps = amplitude_pair(names)
+a1, a2 = (wp[:, names.index(a)] for a in amps) if amps else (None, None)
 pmin = np.minimum(pc1, pc2)
 
 grid = np.linspace(0, 2 * np.pi, 181)
 pred_w = np.asarray(jax.vmap(lambda p: wm(jnp.asarray(grid), *p))(jnp.asarray(wp)))
 pred_d = np.asarray(jax.vmap(lambda p: seeds.neuron_model_2_jax(jnp.asarray(grid), *p))(jnp.asarray(dp)))
 mse_w = np.array(
-    [np.mean((np.asarray(wm(jnp.asarray(x[c]), *wp[k])) - y[c]) ** 2) for k, c in enumerate(cells)]
+    [
+        np.mean((np.asarray(wm(jnp.asarray(x[c][held]), *wp[k])) - y[c][held]) ** 2)
+        for k, c in enumerate(cells)
+    ]
 )
 mse_d = np.array(
     [
-        np.mean((np.asarray(seeds.neuron_model_2_jax(jnp.asarray(x[c]), *dp[k])) - y[c]) ** 2)
+        np.mean((np.asarray(seeds.neuron_model_2_jax(jnp.asarray(x[c][held]), *dp[k])) - y[c][held]) ** 2)
         for k, c in enumerate(cells)
     ]
 )
@@ -106,9 +111,8 @@ bins = np.arange(low, high + 0.05, 0.1)
 hist, edges = np.histogram(pmin, bins=bins)
 gens = rep["per_generation"]
 first_p = rep["first_generation_with_fitted_exponent"]
-a1 = wp[:, names.index("amplitude_1")]
-pdom = np.where(a1 >= a2, pc1, pc2)
-hist_dom, _ = np.histogram(pdom, bins=bins)
+pdom = np.where(a1 >= a2, pc1, pc2) if amps else None
+hist_dom = np.histogram(pdom, bins=bins)[0].tolist() if amps else None
 data = {
     "run": {
         "id": man["run_id"],
@@ -159,13 +163,14 @@ data = {
         "ceiling": high,
         "hist": hist.tolist(),
         "edges": [round(e, 2) for e in edges.tolist()],
-        "second_lobe_share": float(np.mean(a2 > 0.1)),
+        "second_lobe_share": float(np.mean(a2 > 0.1)) if amps else None,
         "n": int(len(cells)),
-        "dom_hist": hist_dom.tolist(),
-        "dom_median": float(np.median(pdom)),
-        "dom_below2": float(np.mean(pdom < 2)),
+        "dom_hist": hist_dom,
+        "dom_median": float(np.median(pdom)) if amps else None,
+        "dom_below2": float(np.mean(pdom < 2)) if amps else None,
     },
     "per_cell_gain": {
+        "trials": "held-out half",
         "median": float(np.median(gain)),
         "share_better": float(np.mean(gain > 0)),
         "mse_w": float(mse_w.mean()),

@@ -77,13 +77,17 @@ def combined_file(run_dir, name):
     return found[0] if found else None
 
 
+HELD_OUT_COLUMNS = ("test_loss", "mean_loss", "params", "initial_params")
+
+
 def searched_programs(run_dir):
     """Every learned program from the final island databases, best discovery loss first, one row per code.
 
     Upstream's combined database drops near-duplicates by `test_loss`, which is scored on the
     selection and locked-test cells, so picking candidates from it would leak those cells. The
-    island databases are deduplicated on discovery loss only. `test_loss` is dropped so nothing
-    downstream can use it.
+    island databases are deduplicated on discovery loss only. Upstream's final step also writes
+    `test_loss`, `mean_loss` and `params` from fits on those cells (and `initial_params` beside
+    them), so all four are dropped and nothing downstream can use them.
     """
     import pandas as pd
 
@@ -92,7 +96,8 @@ def searched_programs(run_dir):
     if not islands:
         raise SystemExit(f"No island programs_db.csv under {run_dir}; has the run finished?")
     frame = pd.concat([pd.read_csv(path) for path in islands], ignore_index=True)
-    frame = frame[frame["iteration_number"] >= 0].drop(columns="test_loss")
+    frame = frame[frame["iteration_number"] >= 0]
+    frame = frame.drop(columns=[c for c in HELD_OUT_COLUMNS if c in frame.columns])
     return (
         frame.sort_values("train_loss", kind="stable")
         .drop_duplicates("program_code_string")

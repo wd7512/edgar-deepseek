@@ -53,7 +53,7 @@ def rescore(args):
         for k in (1, 2)
     ]
     for _, row in frame[frame["iteration_number"] >= 0].head(args.top).iterrows():
-        jax_code = translations.get(code_key(row["program_code_string"]))
+        jax_code = translations.get(code_key(row["program_code_string"])) or row.get("jax_code_string")
         candidates.append(
             {
                 "id": f"{row['iteration_number']}_{row['birth_island']}_{row['batch_index']}",

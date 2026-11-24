@@ -73,8 +73,26 @@ def test_recover_rebuilds_island_databases_from_the_log_and_latest_census(tmp_pa
 
 def test_recover_refuses_a_run_that_finished(tmp_path):
     final = make_run(tmp_path)
-    (final / "island_0").mkdir()
-    (final / "island_0" / "programs_db.csv").write_text("x\n")
+    (final / "combined").mkdir()
+    (final / "combined" / "programs_db.csv").write_text("x\n")
 
     with pytest.raises(SystemExit, match="already"):
         recover(tmp_path)
+
+
+def test_recover_keeps_the_logged_translation_for_rescore(tmp_path):
+    make_run(tmp_path)
+
+    recover(tmp_path)
+
+    pool = searched_programs(tmp_path)
+    assert pool["jax_code_string"][1] == JAX
+
+
+def test_recover_can_be_rerun_after_an_interrupted_attempt(tmp_path):
+    final = make_run(tmp_path)
+    (final / "island_0").mkdir()
+
+    recover(tmp_path)
+
+    assert len(searched_programs(tmp_path)) == 3

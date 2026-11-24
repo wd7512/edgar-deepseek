@@ -400,7 +400,7 @@ function render(D, A, N, run) {
     A ? { label: "Median held-out R²", hint: "higher is better; 1 would be a perfect fit", dg: f3(DGM.r2.median), paper: f3(P.r2.median), run: f3(WM.r2.median), score: [DGM.r2.median, P.r2.median, WM.r2.median] }
       : { label: "Median held-out R²", dg: na, paper: na, run: na },
     A ? { label: "Fit-to-held-out error gap", hint: "how much each fit chases noise; small is not automatically better, a rigid model also has a small gap", dg: f3(gap(DGM)), paper: f3(gap(P)), run: f3(gap(WM)) } : null,
-    { label: "Peakiness, median min(p₁, p₂)", hint: "not better or worse: 2 is a Gaussian peak, lower is sharper; the paper found 1.20", dg: "2 (fixed)", paper: `1.20${A && P.peakiness ? sub(`${f2(P.peakiness.median_min_p)} refitted here`) : ""}`, run: `${f2(D.pmin.median)}${sub(`${Math.round(D.pmin.at_floor * 100)}% sit at its floor of ${D.pmin.floor ?? 1}`)}` },
+    { label: "Peakiness, median min(p₁, p₂)", hint: "not better or worse: 2 is a Gaussian peak, lower is sharper; the paper found 1.20", dg: "2 (fixed)", paper: `1.20${A && P.peakiness ? sub(`${f2(P.peakiness.median_min_p)} refitted here`) : ""}`, run: wk && A.models[wk].peakiness ? `${f2(A.models[wk].peakiness.median_min_p)}${sub(`same ${A.cells.toLocaleString()} neurons; ${Math.round(D.pmin.at_floor * 100)}% of locked-test neurons at its floor of ${D.pmin.floor ?? 1}`)}` : `${f2(D.pmin.median)}${sub(`locked-test neurons; ${Math.round(D.pmin.at_floor * 100)}% at its floor of ${D.pmin.floor ?? 1}`)}` },
     { group: "Population geometry" },
     { label: "Eigenspectrum decay α of the recording", hint: "the target each model's curves should match", span: A ? `4.26 in the paper · ${f2(recAlpha)} measured here (log fit; ${f2(A.data.eligible.linear.alpha)} with a linear fit)` : "4.26 in the paper" },
     A ? { label: "Eigenspectrum decay α of the fitted curves", hint: `closer to the recording's ${f2(recAlpha)} is better`, dg: f2(DGM.pca.log.alpha), paper: `${f2(P.pca.log.alpha)}${sub("4.34 in the paper")}`, run: f2(WM.pca.log.alpha), score: [DGM.pca.log.alpha, P.pca.log.alpha, WM.pca.log.alpha].map(v => -Math.abs(v - recAlpha)) }
@@ -431,6 +431,7 @@ function render(D, A, N, run) {
   drawSearch(D, A);
   drawHist(D, A, "min");
   document.getElementById("p-min").onclick = () => drawHist(D, A, "min");
+  document.getElementById("p-dom").hidden = !D.pmin.dom_hist;
   document.getElementById("p-dom").onclick = () => drawHist(D, A, "dom");
   drawCells(D, A);
   drawTime(D);
@@ -608,7 +609,7 @@ function drawHist(D, A, mode) {
   const P = D.pmin, counts = mode === "min" ? P.hist : P.dom_hist, med = mode === "min" ? P.median : P.dom_median;
   const paperP = A && mode === "min" ? A.models[PAPER_NAME].peakiness : null;
   document.getElementById("pcaption").textContent = mode === "min"
-    ? `Each neuron's sharper peak, min(p₁, p₂). Lower is sharper; 2 is a Gaussian, which the double Gaussian is fixed at. In the paper's theory this exponent sets how fast the population eigenspectrum decays, α = 2(p + 1). This run's winner cannot go below ${P.floor ?? 1}, and ${Math.round(P.at_floor * 100)}% of neurons sit there.${paperP ? " The paper's equation allows p down to 0.1." : ""} Shares of neurons, so groups of different size compare directly.`
+    ? `Each neuron's sharper peak, min(p₁, p₂). Lower is sharper; 2 is a Gaussian, which the double Gaussian is fixed at. In the paper's theory this exponent sets how fast the population eigenspectrum decays, α = 2(p + 1). This run's winner cannot go below ${P.floor ?? 1}, and ${Math.round(P.at_floor * 100)}% of its locked-test neurons sit there.${paperP ? " The paper's equation allows p down to 0.1." : ""} Shares of neurons, so groups of different size compare directly.`
     : `Exponent of each neuron's larger peak only, for this run's winner. A small second peak can take a low p without changing the curve much, so this is the stricter view: median ${f2(med)}.`;
   document.getElementById("p-legend").innerHTML = `<span><i class="key" style="background:var(--ai)"></i>this run's winner, ${P.n} locked-test neurons</span>${paperP ? `<span><i class="key" style="background:var(--paper)"></i>paper's equation, refitted to all ${A.cells.toLocaleString()} neurons</span>` : ""}<span><i class="key dash" style="color:var(--dg)"></i>double Gaussian, p = 2</span>${mode === "min" ? `<span><i class="key dash" style="color:var(--paper)"></i>paper's reported median, 1.20</span>` : ""}`;
   const host = document.getElementById("hist"); host.innerHTML = "";

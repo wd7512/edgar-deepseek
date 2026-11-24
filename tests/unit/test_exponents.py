@@ -26,3 +26,19 @@ def test_fitted_exponents_clips_to_the_programs_bounds():
     assert first.tolist() == [0.5, 2.0]
     assert second.tolist() == [4.0, 1.5]
     assert fitted_exponents(["a"], params[:, :1], code) is None
+
+
+def test_clip_bounds_reads_only_plain_numbers_and_keyword_bounds():
+    assert clip_bounds("p = jnp.clip(p, 1.0, 4.0-1e-6)", "p") == (-np.inf, np.inf)
+    assert clip_bounds("p = jnp.clip(p, -1e-3, 4.)", "p") == (-0.001, 4.0)
+    assert clip_bounds("p = np.clip(p, a_min=0.5, a_max=4.0)", "p") == (0.5, 4.0)
+    assert clip_bounds("p = jnp.clip(p, min=0.5, max=4.0)", "p") == (0.5, 4.0)
+    assert clip_bounds("p = jnp.clip(p, P_MIN, 4.0)", "p") == (-np.inf, np.inf)
+
+
+def test_amplitude_pair_finds_each_runs_naming():
+    from edgar_study.exponents import amplitude_pair
+
+    assert amplitude_pair(["amplitude_1", "x", "amplitude_2"]) == ("amplitude_1", "amplitude_2")
+    assert amplitude_pair(["amp_1", "amp_2"]) == ("amp_1", "amp_2")
+    assert amplitude_pair(["gain"]) is None

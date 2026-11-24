@@ -4,7 +4,8 @@ Upstream writes its island databases only when the search ends. Until then it ke
 every scored program after each generation (ids and discovery losses, no code) and logs each
 program's code under its id in `hypothesis_engine.log`. `recover` joins the two and writes one
 `island_<k>/programs_db.csv` per birth island plus `combined/census.npy`, so `rescore` and the
-page scripts run unchanged. Every scored program is kept, including ones a finished run would
+page scripts run unchanged. Each row keeps its logged JAX translation for runs without
+`translations.jsonl`. Every scored program is kept, including ones a finished run would
 have dropped from its islands.
 """
 
@@ -50,8 +51,8 @@ def recover(run_dir):
     if not found:
         raise SystemExit(f"No program_databases under {run_dir}.")
     final = found[-1]
-    if any(final.glob("island_*/programs_db.csv")):
-        raise SystemExit(f"{final} already has island databases; nothing to recover.")
+    if (final / "combined" / "programs_db.csv").exists():
+        raise SystemExit(f"{final} already has upstream's final databases; nothing to recover.")
     censuses = sorted(
         final.glob("iteration_updates/iteration_*/census.npy"),
         key=lambda path: int(path.parent.name.split("_")[1]),
@@ -73,6 +74,7 @@ def recover(run_dir):
         rows.append(
             {
                 "program_code_string": code["program_code_string"],
+                "jax_code_string": code["jax_code_string"],
                 "parameter_estimator_code_string": code["parameter_estimator_code_string"],
                 "iteration_number": key[0],
                 "birth_island": key[1],
@@ -84,7 +86,7 @@ def recover(run_dir):
         )
     frame = pd.DataFrame(rows)
     for island, group in frame.groupby("birth_island"):
-        (final / f"island_{island}").mkdir()
+        (final / f"island_{island}").mkdir(exist_ok=True)
         group.to_csv(final / f"island_{island}" / "programs_db.csv", index=False)
     (final / "combined").mkdir(exist_ok=True)
     shutil.copy(censuses[-1], final / "combined" / "census.npy")

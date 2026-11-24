@@ -1,5 +1,6 @@
 """Find a learned program's two peak exponents and the range the program itself clips them to."""
 
+import logging
 import re
 
 import numpy as np
@@ -10,21 +11,36 @@ PAIRS = (
     ("power_1", "power_2"),
     ("shape_1", "shape_2"),
 )
+AMPLITUDES = (("amplitude_1", "amplitude_2"), ("amp_1", "amp_2"), ("A1", "A2"), ("a1", "a2"))
+NUMBER = r"\s*(?:(?:a_)?(?:min|max)\s*=\s*)?([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*"
+
+
+def _pair(names, pairs):
+    return next((pair for pair in pairs if pair[0] in names and pair[1] in names), None)
 
 
 def exponent_pair(names):
     """The names of the two peak exponents among a program's parameter names, or None."""
-    return next((pair for pair in PAIRS if pair[0] in names and pair[1] in names), None)
+    return _pair(names, PAIRS)
+
+
+def amplitude_pair(names):
+    """The names of the two peak amplitudes among a program's parameter names, or None."""
+    return _pair(names, AMPLITUDES)
 
 
 def clip_bounds(code, name):
-    """The `(low, high)` a program passes to `clip(name, low, high)`, or `clamp(low, name, high)`, or no bounds if it never clips `name`."""
-    number = r"\s*([-+.\deE]+)\s*"
-    match = re.search(rf"clip\(\s*{name}\s*,{number},{number}\)", code)
-    if match:
-        return float(match.group(1)), float(match.group(2))
-    match = re.search(rf"clamp\({number},\s*{name}\s*,{number}\)", code)
-    return (float(match.group(1)), float(match.group(2))) if match else (-np.inf, np.inf)
+    """The plain-number `(low, high)` a program passes to `clip(name, low, high)` or `clamp(low, name, high)`.
+
+    Keyword bounds (`min=`, `a_min=`) count. Anything else, such as an expression or a named
+    constant, gives no bounds and a warning.
+    """
+    for pattern in (rf"clip\(\s*{name}\s*,{NUMBER},{NUMBER}\)", rf"clamp\({NUMBER},\s*{name}\s*,{NUMBER}\)"):
+        match = re.search(pattern, code)
+        if match:
+            return float(match.group(1)), float(match.group(2))
+    logging.warning("No plain-number clip found for %s; treating it as unbounded", name)
+    return -np.inf, np.inf
 
 
 def fitted_exponents(names, params, code):

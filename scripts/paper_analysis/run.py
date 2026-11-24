@@ -74,7 +74,7 @@ def spectrum_summary(spectrum):
 
 def source(model):
     try:
-        return inspect.getsource(model)
+        return inspect.getsource(inspect.getmodule(model))
     except (OSError, TypeError):
         return ""
 
