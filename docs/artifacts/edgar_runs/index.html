@@ -1,0 +1,810 @@
+<title>EDGAR Free-Model Replications</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Schibsted+Grotesk:wght@500;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+/* Layout: a single reading column of numbered figures, like a lab notebook entry, with wide figures breaking out to 1040px. */
+:root {
+  --bg: #fcfcfb;
+  --panel: #f3f4f2;
+  --fg: #141513;
+  --fg-2: #4d514c;
+  --fg-3: #767b75;
+  --rule: #dfe2dd;
+  --grid: #e9ebe7;
+  --dot: #9aa09a;
+  --ai: #2a78d6;
+  --dg: #eb6834;
+  --paper: #1baf7a;
+  --paper-ink: #0f7a54;
+  --font-display: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1a1a19; --panel: #232422; --fg: #eeefeb; --fg-2: #c0c3bc; --fg-3: #8d918a;
+    --rule: #33352f; --grid: #2a2c28; --dot: #6b706a;
+    --ai: #3987e5; --dg: #d95926; --paper: #199e70; --paper-ink: #3cc893;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1a1a19; --panel: #232422; --fg: #eeefeb; --fg-2: #c0c3bc; --fg-3: #8d918a;
+  --rule: #33352f; --grid: #2a2c28; --dot: #6b706a;
+  --ai: #3987e5; --dg: #d95926; --paper: #199e70; --paper-ink: #3cc893;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font: 17px/1.55 var(--font-body); }
+main {
+  max-width: 1040px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 64px;
+  display: grid; gap: 56px;
+}
+.prose { max-width: 680px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(30px, 5vw, 44px); line-height: 1.1; font-weight: 700; }
+h2 { font-size: 24px; line-height: 1.2; font-weight: 700; }
+h3 { font-size: 15px; font-weight: 500; }
+p { margin: 0; }
+.eyebrow { font: 500 12px/1.4 var(--font-data); letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-3); }
+header { display: grid; gap: 16px; }
+.lede { font-size: 19px; color: var(--fg-2); max-width: 680px; }
+.answers { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-top: 8px; }
+.answer { background: var(--panel); border-radius: 6px; padding: 16px; display: grid; gap: 6px; align-content: start; }
+.answer .verdict { font: 600 13px/1.3 var(--font-data); letter-spacing: 0.04em; text-transform: uppercase; }
+.answer .verdict.yes { color: var(--paper-ink); }
+.answer .verdict.partly { color: var(--fg-2); }
+.answer .num { font: 500 26px/1.1 var(--font-data); font-variant-numeric: tabular-nums; }
+.answer p { font-size: 15px; color: var(--fg-2); }
+section { display: grid; gap: 14px; }
+.figlabel { font: 500 12px/1.4 var(--font-data); color: var(--fg-3); letter-spacing: 0.04em; }
+.caption { font-size: 15px; color: var(--fg-2); max-width: 720px; }
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { font-family: var(--font-data); font-size: 11px; fill: var(--fg-3); }
+.chart .lbl { fill: var(--fg-2); }
+.chart .lbl-strong { fill: var(--fg); font-weight: 500; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 13px/1.4 var(--font-data); color: var(--fg-2); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.key { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.key.dot { width: 8px; height: 8px; border-radius: 50%; }
+.key.dash { background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px) !important; height: 2px; }
+.key.ring { width: 8px; height: 8px; border-radius: 50%; background: transparent !important; border: 2px solid; }
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; min-width: 620px; }
+th, td { text-align: left; padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 500 12px/1.4 var(--font-data); color: var(--fg-3); letter-spacing: 0.04em; text-transform: uppercase; }
+td.n, th.n { text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; font-size: 14px; }
+td .sub { display: block; font-size: 13px; color: var(--fg-3); }
+.toggle { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; width: fit-content; }
+.toggle button { font: 500 13px/1 var(--font-data); background: transparent; color: var(--fg-2); border: 0; padding: 9px 12px; cursor: pointer; }
+.toggle button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.toggle button:focus-visible, summary:focus-visible { outline: 2px solid var(--ai); outline-offset: 2px; }
+.multiples { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 20px 24px; }
+.multiples .cell { display: grid; gap: 4px; min-width: 0; }
+.multiples .cell h3 { font-family: var(--font-data); font-size: 13px; color: var(--fg); }
+.multiples .cell .meta { font: 12px/1.4 var(--font-data); color: var(--fg-3); }
+.eq { font: 18px/1.7 "Cambria Math", "STIX Two Math", "Times New Roman", serif; background: var(--panel); border-radius: 6px; padding: 16px 18px; overflow-x: auto; }
+.eq .term { white-space: nowrap; }
+.eq .new { color: var(--ai); }
+details { border-top: 1px solid var(--rule); padding-top: 10px; }
+summary { cursor: pointer; font: 500 14px/1.4 var(--font-data); color: var(--fg-2); }
+pre { font: 12.5px/1.5 var(--font-data); background: var(--panel); padding: 14px; border-radius: 6px; overflow-x: auto; margin: 10px 0 0; color: var(--fg); }
+ul.caveats { margin: 0; padding-left: 20px; display: grid; gap: 8px; max-width: 720px; color: var(--fg-2); font-size: 16px; }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; }
+.pair h3, .stack h3 { font-family: var(--font-data); font-size: 13px; }
+.meta { font: 12px/1.4 var(--font-data); color: var(--fg-3); margin: 2px 0 4px; }
+.runbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.runbar select { font: 500 13px/1.2 var(--font-data); color: var(--fg); background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 7px 10px; max-width: 100%; }
+.strips { display: grid; gap: 4px; }
+.tip { position: absolute; pointer-events: none; background: var(--fg); color: var(--bg); font: 12px/1.45 var(--font-data); padding: 7px 9px; border-radius: 5px; white-space: nowrap; z-index: 5; transform: translate(-50%, calc(-100% - 10px)); }
+footer { font-size: 13px; color: var(--fg-3); border-top: 1px solid var(--rule); padding-top: 14px; display: grid; gap: 4px; }
+a { color: var(--ai); }
+@media (prefers-reduced-motion: no-preference) { .chart path.reveal { transition: opacity .3s; } }
+</style>
+
+<main>
+  <header>
+    <div class="runbar">
+      <label class="eyebrow" for="run-pick">Run</label>
+      <select id="run-pick"></select>
+      <span class="eyebrow" id="run-count"></span>
+    </div>
+    <h1>Does a free model rediscover EDGAR's tuning law?</h1>
+    <p class="lede" id="lede"></p>
+    <div class="answers" id="answers"></div>
+  </header>
+
+  <section id="across-section">
+    <div class="figlabel">ACROSS RUNS</div>
+    <h2>Every run so far</h2>
+    <p class="caption">One dot per run; the selected run is ringed. Green lines are the paper's values. Click a dot to switch runs.</p>
+    <div class="strips" id="across"></div>
+  </section>
+
+  <section>
+    <h2>Side by side with the paper</h2>
+    <div class="tbl-wrap"><table id="compare"></table></div>
+  </section>
+
+  <section>
+    <div class="figlabel">FIGURE 1 · SEARCH</div>
+    <h2>How the search went</h2>
+    <p class="caption">Every scored program, in the order it was proposed, by penalized discovery loss (10 × MSE + 0.01 × parameters on held-out trials of the 1,055 discovery cells; lower is better). Shaded generations used the high-reasoning tier, standing in for the paper's Gemini 2.5 Flash. The paper's Fig. 2g shows the same view as perplexity relative to the double Gaussian.</p>
+    <div class="legend">
+      <span><i class="key dot" style="background:var(--dot)"></i>scored program</span>
+      <span style="color:var(--ai)"><i class="key" style="background:var(--ai)"></i><span style="color:var(--fg-2)">best so far</span></span>
+      <span style="color:var(--dg)"><i class="key dash"></i><span style="color:var(--fg-2)">double Gaussian seed</span></span>
+    </div>
+    <div class="chart" id="search"></div>
+  </section>
+
+  <section>
+    <div class="figlabel">FIGURE 2 · HELD-OUT CELLS</div>
+    <h2>The winner against the seeds on cells it never saw</h2>
+    <p class="caption" id="locked-cap"></p>
+    <div class="legend">
+      <span><i class="key ring" style="color:var(--fg-2)"></i>selection cells</span>
+      <span><i class="key dot" style="background:var(--fg-2)"></i>locked test cells</span>
+    </div>
+    <div class="chart" id="locked"></div>
+    <details>
+      <summary>All candidates and the two seeds</summary>
+      <div class="tbl-wrap"><table id="candidates"></table></div>
+    </details>
+  </section>
+
+  <section>
+    <div class="figlabel">FIGURE 3 · PEAKINESS</div>
+    <h2>How peaky are the fitted tuning curves?</h2>
+    <p class="caption" id="pcaption"></p>
+    <div class="toggle" role="group" aria-label="Exponent shown">
+      <button type="button" id="p-min" aria-pressed="true">min(p₁, p₂), as the paper</button>
+      <button type="button" id="p-dom" aria-pressed="false">larger lobe only</button>
+    </div>
+    <div class="chart" id="hist"></div>
+  </section>
+
+  <section>
+    <div class="figlabel">FIGURE 4 · EXAMPLE CELLS</div>
+    <h2>Where the extra parameters help</h2>
+    <p class="caption">Four locked test cells: the one the winner improves most, the fourth, and cells at the 75th and 50th percentile of improvement. Response is scaled so each cell's response vector has norm 100.</p>
+    <div class="legend">
+      <span><i class="key dot" style="background:var(--dot)"></i>trial</span>
+      <span><i class="key" style="background:var(--fg)"></i>30° bin mean</span>
+      <span><i class="key" style="background:var(--ai)"></i>winning program</span>
+      <span><i class="key" style="background:var(--dg)"></i>double Gaussian</span>
+    </div>
+    <div class="multiples" id="cells"></div>
+  </section>
+
+  <section>
+    <div class="figlabel">THE EQUATION</div>
+    <h2 id="eq-title"></h2>
+    <div class="prose"><p class="caption" id="eq-cap"></p></div>
+    <div class="eq" id="eq"></div>
+    <details>
+      <summary>Program source as proposed (docstring removed)</summary>
+      <pre id="code"></pre>
+    </details>
+  </section>
+
+  <section>
+    <div class="figlabel">FIGURE 5 · THE EXTRA WAVE</div>
+    <h2>What the winner's extra cosine terms add</h2>
+    <p class="caption">The winner's two cosine terms add up to one sine wave that goes once around the circle. To isolate it we fit the paper's model with and without that wave (2 extra parameters) to every cell. Top: fits. Bottom: the paper model + wave pulled apart into its pieces.</p>
+    <div class="legend">
+      <span><i class="key" style="background:var(--fg)"></i>15° bin mean</span>
+      <span><i class="key" style="background:var(--dg)"></i>double Gaussian</span>
+      <span><i class="key" style="background:var(--paper)"></i>paper model</span>
+      <span><i class="key" style="background:var(--ai)"></i>paper model + wave</span>
+    </div>
+    <div class="multiples" id="wave-cells"></div>
+    <div class="legend">
+      <span><i class="key" style="background:var(--dot)"></i>baseline</span>
+      <span><i class="key" style="background:var(--paper)"></i>peak 1</span>
+      <span><i class="key dash" style="color:var(--paper)"></i>peak 2</span>
+      <span><i class="key" style="background:var(--ai)"></i>wave on its own</span>
+    </div>
+    <div class="pair">
+      <div><h3>How big is the wave?</h3><p class="meta" id="wave-size-cap"></p><div class="chart" id="wave-size"></div></div>
+      <div><h3>What it buys on held-out trials</h3><p class="meta" id="wave-gain-cap"></p><div class="chart" id="wave-gain"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="figlabel">FIGURE 6 · POPULATION GEOMETRY (paper Fig. 1c, 3f)</div>
+    <h2>Eigenspectrum decay</h2>
+    <p class="caption" id="spec-cap"></p>
+    <div class="toggle" role="group" aria-label="Cells">
+      <button type="button" id="spec-eligible" aria-pressed="true">2,110 reliable cells</button>
+      <button type="button" id="spec-all" aria-pressed="false">all cells</button>
+    </div>
+    <div class="legend" id="spec-legend"></div>
+    <div class="chart" id="spectrum"></div>
+    <div class="tbl-wrap"><table id="alpha-table"></table></div>
+  </section>
+
+  <section>
+    <div class="figlabel">FIGURE 7 · CAN rcvPCA RECOVER A KNOWN SPECTRUM? (paper Fig. S1)</div>
+    <h2>Validation, and a bias in the paper's recipe</h2>
+    <p class="caption">Ground truth: PCA of the paper model's fitted curves. We add the recording's own trial-to-trial noise and run rcvPCA. The paper's recipe (residual from the repeat mean) makes repeats' noise negatively correlated, which pushes the tail below zero and steepens α; rotating each repeat's noise to a different direction removes that.</p>
+    <div class="legend">
+      <span><i class="key dot" style="background:var(--fg-3)"></i>ground truth (noise-free PCA)</span>
+      <span><i class="key dot" style="background:var(--ai)"></i>rcvPCA, independent noise</span>
+      <span><i class="key ring" style="color:var(--dg)"></i>rcvPCA, paper's noise recipe</span>
+    </div>
+    <div class="chart" id="validation"></div>
+  </section>
+
+  <section>
+    <div class="figlabel">FIGURE 8 · ABLATIONS (paper Fig. 3e)</div>
+    <h2>Which ingredients earn their parameters</h2>
+    <p class="caption">Median per-cell gain in held-out R² over the double Gaussian, on all 2,110 reliable cells. Our R² is over held-out trials, so trial noise caps it; the paper split along the stimulus axis instead.</p>
+    <div class="chart" id="ablation"></div>
+  </section>
+  <section>
+    <div class="figlabel">FIGURE 9 · COST</div>
+    <h2 id="time-title">Where the time went</h2>
+    <p class="caption">Wall time during which at least one call of each stage was running, on an Apple M5 Pro (15 CPU cores, no GPU). LLM stages run concurrently with each other, so their bars overlap in time and do not sum to the total. Fitting runs on the event loop and does not overlap with the other CPU work.</p>
+    <div class="chart" id="time"></div>
+  </section>
+
+  <section class="prose">
+    <h2>Read with care</h2>
+    <ul class="caveats" id="caveats">    </ul>
+  </section>
+
+  <footer>
+    <span id="footer-run"></span>
+    <span>Paper: Tilbury et al., "AI-discovered tuning laws explain neuronal population code geometry", bioRxiv v3, 4 December 2025. <a href="https://doi.org/10.1101/2025.11.12.688086">doi:10.1101/2025.11.12.688086</a></span>
+  </footer>
+</main>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const tip = document.getElementById("tip");
+function el(name, attrs, parent) {
+  const node = document.createElementNS(NS, name);
+  for (const k in attrs) node.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(node);
+  return node;
+}
+function txt(parent, x, y, s, attrs = {}) { const t = el("text", { x, y, ...attrs }, parent); t.textContent = s; return t; }
+function scale(d0, d1, r0, r1) { const f = v => r0 + (v - d0) / (d1 - d0) * (r1 - r0); f.inv = p => d0 + (p - r0) / (r1 - r0) * (d1 - d0); return f; }
+function svg(host, w, h) { return el("svg", { viewBox: `0 0 ${w} ${h}`, role: "img" }, host); }
+function showTip(host, x, y, html) {
+  const box = host.getBoundingClientRect(), page = document.querySelector("main").getBoundingClientRect();
+  tip.innerHTML = html; tip.hidden = false;
+  const vb = host.querySelector("svg").viewBox.baseVal, k = box.width / vb.width;
+  let left = box.left + x * k + window.scrollX, top = box.top + y * k + window.scrollY;
+  tip.style.left = left + "px"; tip.style.top = top + "px";
+  const r = tip.getBoundingClientRect();
+  if (r.left < 8) tip.style.left = (left + 8 - r.left) + "px";
+  if (r.right > window.innerWidth - 8) tip.style.left = (left - (r.right - window.innerWidth + 8)) + "px";
+}
+function hideTip() { tip.hidden = true; }
+const f2 = v => v.toFixed(2), f3 = v => v.toFixed(3);
+
+const CHARTS = ["search", "locked", "hist", "cells", "time", "wave-cells", "wave-size", "wave-gain", "spectrum", "validation", "ablation"];
+const cache = {};
+let RUNS = [];
+
+fetch("runs.json").then(r => r.json()).then(index => {
+  RUNS = index.runs;
+  const pick = document.getElementById("run-pick");
+  pick.innerHTML = RUNS.map(r => `<option value="${r.id}">${r.label}</option>`).join("");
+  document.getElementById("run-count").textContent = `${RUNS.length} run${RUNS.length === 1 ? "" : "s"}`;
+  pick.onchange = () => selectRun(pick.value);
+  const wanted = new URLSearchParams(location.hash.slice(1)).get("run");
+  selectRun(RUNS.some(r => r.id === wanted) ? wanted : RUNS[RUNS.length - 1].id);
+}).catch(failed);
+
+function failed() {
+  document.getElementById("answers").innerHTML = '<p class="caption">The run data did not load. Reload the page to try again.</p>';
+}
+
+function load(run) {
+  if (!cache[run.id]) {
+    const get = name => fetch(`${run.folder}/${name}`).then(r => (r.ok ? r.json() : null)).catch(() => null);
+    cache[run.id] = Promise.all([get("data.json"), get("paper_analysis.json"), get("notes.json")]);
+  }
+  return cache[run.id];
+}
+
+function selectRun(id) {
+  const run = RUNS.find(r => r.id === id);
+  document.getElementById("run-pick").value = id;
+  history.replaceState(null, "", `#run=${encodeURIComponent(id)}`);
+  load(run).then(([D, A, N]) => {
+    if (!D) return failed();
+    for (const c of CHARTS) document.getElementById(c).innerHTML = "";
+    hideTip();
+    render(D, A, N || {}, run);
+    for (const sec of ["wave-cells", "spectrum", "validation", "ablation"]) document.getElementById(sec).closest("section").hidden = !A;
+    if (A) renderPaper(A);
+    drawAcross(id);
+  }).catch(failed);
+}
+
+function render(D, A, N, run) {
+  const W = D.locked.winner, DG = D.locked.double_gaussian;
+  const gain = DG.score - W.score, wid = D.winner_id;
+  const counts = D.cell_counts || {};
+  document.getElementById("lede").innerHTML = `EDGAR's unchanged evolutionary search on the mouse V1 drifting-grating recording from Tilbury et al. (2025), with Gemini swapped for <code>${D.run.model}</code>. This run proposed ${D.run.proposals} programs over ${D.generations.length} generations.`;
+  const firstGen = D.first_exponent_gen;
+  document.getElementById("answers").innerHTML = `
+    <div class="answer"><span class="verdict ${gain > 0 ? "yes" : "partly"}">${gain > 0 ? "Beats" : "Does not beat"} the double Gaussian</span><span class="num">${gain > 0 ? "−" : "+"}${f2(Math.abs(gain))}</span><p>Locked-test score, ${f2(W.score)} vs ${f2(DG.score)}; MSE ${((1 - W.mse / DG.mse) * 100).toFixed(1)}% lower.</p></div>
+    <div class="answer"><span class="verdict ${D.pmin.median < 2 ? "yes" : "partly"}">Peakiness</span><span class="num">p ≈ ${f2(D.pmin.median)}</span><p>Median min(p₁, p₂) on ${D.pmin.n} locked cells. Paper: 1.20. Gaussian: 2.</p></div>
+    ${A ? `<div class="answer"><span class="verdict partly">Eigenspectrum α</span><span class="num">${f2(A.data.eligible.log.alpha)}</span><p>Recording, rcvPCA, log fit (linear ${f2(A.data.eligible.linear.alpha)}). Paper: 4.26.</p></div>` : ""}
+    <div class="answer"><span class="verdict partly">Exponent first appeared</span><span class="num">gen ${firstGen ?? "–"}</span><p>${D.exp_programs} of ${D.run.scored} scored programs fit an exponent.</p></div>`;
+
+  const wk = A ? winnerKey(A) : null;
+  const rows = [
+    ["Code-writing model", "Gemini 2.0 Flash, with 2.5 Flash every third generation", D.run.model],
+    ["Programs proposed", "576", `${D.run.proposals} (${D.run.scored} scored)`],
+    ["Wall time", "about 45 min", `${D.run.hours.toFixed(2)} h`],
+    ["LLM cost", "$8.25", D.run.cost ?? "$0.00"],
+    ["Parameters per cell", "11", String(W.params)],
+    ["Peakiness, median min(p₁, p₂)", "1.20", f2(D.pmin.median) + (A && A.models[PAPER_NAME].peakiness ? ` · paper model refit here: ${f2(A.models[PAPER_NAME].peakiness.median_min_p)}` : "")],
+    ["Gain over double Gaussian", "modest, cross-validated R²", `${f2(gain)} penalized score; better on ${Math.round(D.per_cell_gain.share_better * 100)}% of cells`],
+    ["Eigenspectrum α, recording", "4.26", A ? `${f2(A.data.eligible.log.alpha)} log fit · ${f2(A.data.eligible.linear.alpha)} linear fit` : "not measured"],
+    ["Eigenspectrum α, model", "4.34 (paper model)", A ? `${f2(A.models[PAPER_NAME].pca.log.alpha)} paper model · ${f2(A.models[wk].pca.log.alpha)} winner` : "not measured"],
+  ];
+  document.getElementById("compare").innerHTML = `<thead><tr><th></th><th>Tilbury et al. (2025)</th><th>This run</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("")}</tbody>`;
+
+  document.getElementById("locked-cap").textContent = `The top ${D.candidates.length - 2} programs by discovery loss competed on ${counts.selection ?? "the"} selection cells; only the winner and the two seeds were then scored once on ${counts.locked_test ?? "the"} locked test cells.`;
+  document.getElementById("eq-title").textContent = `Program ${wid}${N.equation_title ? ": " + N.equation_title : ""}`;
+  document.getElementById("eq-cap").innerHTML = N.equation_caption || "";
+  document.getElementById("eq").innerHTML = N.equation_html || "";
+  document.getElementById("eq").hidden = !N.equation_html;
+  document.getElementById("code").textContent = D.winner_code;
+  document.getElementById("time-title").textContent = `Where the ${D.run.hours.toFixed(1)} hours went`;
+  document.getElementById("caveats").innerHTML = (N.caveats || []).map(c => `<li>${c}</li>`).join("");
+  document.getElementById("footer-run").textContent = `Data: run ${D.run.id} at commit ${D.run.sha}, rescored on the strict-holdout-v1 split.${A ? ` Population analyses refit every model to all ${A.cells.toLocaleString()} reliable cells.` : ""}`;
+
+  drawSearch(D);
+  drawLocked(D);
+  drawHist(D, "min");
+  document.getElementById("p-min").onclick = () => drawHist(D, "min");
+  document.getElementById("p-dom").onclick = () => drawHist(D, "dom");
+  drawCells(D);
+  drawTime(D);
+
+  const cands = D.candidates.map(c => `<tr><td>${c.id.startsWith("seed") ? (c.id === "seed_1" ? "single Gaussian" : "double Gaussian") : c.id}${c.id === wid ? " <span class='sub'>winner</span>" : ""}</td><td class="n">${c.g < 0 ? "seed" : c.g}</td><td class="n">${c.params ?? "–"}</td><td class="n">${c.disc ? f3(c.disc) : "–"}</td><td class="n">${c.sel ? f3(c.sel) : "failed"}</td></tr>`).join("");
+  document.getElementById("candidates").innerHTML = `<thead><tr><th>Program</th><th class="n">Generation</th><th class="n">Params</th><th class="n">Discovery</th><th class="n">Selection</th></tr></thead><tbody>${cands}</tbody>`;
+}
+
+const ACROSS = [
+  ["gain", "locked-test gain over double Gaussian", v => f2(v), null],
+  ["pmin", "median min(p₁, p₂)", v => f2(v), 1.2],
+  ["alpha_data", "recording α (rcvPCA, log fit)", v => f2(v), 4.26],
+  ["alpha_winner", "winner α (PCA, log fit)", v => f2(v), 4.34],
+  ["wave_gain", "R² gain from the wave (median)", v => v.toFixed(4), null],
+  ["hours", "wall hours", v => v.toFixed(2), 0.75],
+];
+
+function drawAcross(selected) {
+  const host = document.getElementById("across"); host.innerHTML = "";
+  const w = 1000, rowH = 44, m = { l: 290, r: 70, t: 8, b: 8 };
+  const rows = ACROSS.filter(([k]) => RUNS.some(r => r.summary[k] != null));
+  const s = svg(host, w, m.t + m.b + rowH * rows.length);
+  rows.forEach(([key, label, fmt, ref], i) => {
+    const vals = RUNS.map(r => r.summary[key]).filter(v => v != null);
+    const all = ref == null ? vals : vals.concat(ref);
+    let lo = Math.min(...all), hi = Math.max(...all);
+    const pad = (hi - lo || Math.abs(hi) || 1) * 0.25; lo -= pad; hi += pad;
+    const X = scale(lo, hi, m.l, w - m.r), y = m.t + i * rowH + rowH / 2;
+    txt(s, m.l - 14, y + 4, label, { "text-anchor": "end", class: "lbl" });
+    el("line", { x1: m.l, x2: w - m.r, y1: y, y2: y, stroke: "var(--grid)" }, s);
+    txt(s, m.l, y + 18, fmt(lo), { style: "font-size:10px" });
+    txt(s, w - m.r, y + 18, fmt(hi), { "text-anchor": "end", style: "font-size:10px" });
+    if (ref != null) { el("line", { x1: X(ref), x2: X(ref), y1: y - 12, y2: y + 12, stroke: "var(--paper)", "stroke-width": 2 }, s); txt(s, X(ref), y - 15, `paper ${fmt(ref)}`, { "text-anchor": "middle", style: "font-size:10px" }); }
+    for (const r of RUNS) {
+      const v = r.summary[key]; if (v == null) continue;
+      const on = r.id === selected;
+      const dot = el("circle", { cx: X(v), cy: y, r: on ? 7 : 5, fill: "var(--ai)", stroke: on ? "var(--fg)" : "var(--bg)", "stroke-width": 2, style: "cursor:pointer" }, s);
+      if (on) txt(s, X(v), y + 20, fmt(v), { "text-anchor": "middle", class: "lbl-strong" });
+      const t = el("circle", { cx: X(v), cy: y, r: 12, fill: "transparent", style: "cursor:pointer" }, s);
+      t.addEventListener("pointerenter", () => showTip(host, X(v), y - 8, `${r.label}<br>${label}: ${fmt(v)}`));
+      t.addEventListener("pointerleave", hideTip);
+      t.addEventListener("click", () => selectRun(r.id));
+    }
+  });
+}
+
+function drawSearch(D) {
+  const host = document.getElementById("search"), w = 1000, h = 380, m = { l: 56, r: 92, t: 14, b: 40 };
+  const s = svg(host, w, h);
+  const islands = Math.max(...D.programs.map(p => p.i)) + 1, slots = Math.max(...D.programs.map(p => p.b)) + 1;
+  const per = islands * slots, gens = D.generations.length, n = gens * per, seed = D.seeds["1"];
+  const best0 = Math.min(seed, ...D.programs.map(p => p.loss));
+  const y0 = Math.floor((best0 - 0.2) * 5) / 5, y1 = Math.ceil((seed + (seed - best0) * 0.8 + 0.4) * 5) / 5;
+  const yStep = (y1 - y0) > 3 ? 1 : (y1 - y0) > 1.2 ? 0.4 : 0.2;
+  const X = scale(0, n, m.l, w - m.r), Y = scale(y0, y1, h - m.b, m.t);
+  for (let g = 0; g < gens; g += 3) el("rect", { x: X(g * per), y: m.t, width: X(per) - X(0), height: h - m.t - m.b, fill: "var(--panel)" }, s);
+  for (let v = y0; v <= y1 + 1e-9; v += yStep) {
+    el("line", { x1: m.l, x2: w - m.r, y1: Y(v), y2: Y(v), stroke: "var(--grid)" }, s);
+    txt(s, m.l - 8, Y(v) + 4, v.toFixed(1), { "text-anchor": "end" });
+  }
+  const gStep = gens > 24 ? 5 : gens > 12 ? 2 : 1;
+  for (let g = 0; g < gens; g += gStep) txt(s, X(g * per + per / 2), h - m.b + 18, String(g), { "text-anchor": "middle" });
+  txt(s, X(n / 2), h - 4, "generation", { "text-anchor": "middle", class: "lbl" });
+  txt(s, 14, Y((y0 + y1) / 2), "discovery loss", { transform: `rotate(-90 14 ${Y((y0 + y1) / 2)})`, "text-anchor": "middle", class: "lbl" });
+  el("line", { x1: m.l, x2: w - m.r, y1: Y(seed), y2: Y(seed), stroke: "var(--dg)", "stroke-width": 2, "stroke-dasharray": "5 4" }, s);
+  txt(s, w - m.r + 6, Y(seed) + 4, `double G ${f2(seed)}`, { class: "lbl" });
+  const pts = D.programs.map(p => ({ ...p, idx: p.g * per + p.i * slots + p.b })).sort((a, b) => a.idx - b.idx);
+  let above = 0;
+  const marks = [];
+  for (const p of pts) {
+    if (p.loss > y1) { above++; continue; }
+    marks.push({ p, cx: X(p.idx + 0.5), cy: Y(p.loss) });
+    el("circle", { cx: X(p.idx + 0.5), cy: Y(p.loss), r: 3, fill: "var(--dot)", "fill-opacity": 0.75 }, s);
+  }
+  let best = seed, d = `M${X(0)},${Y(seed)}`;
+  for (const p of pts) if (p.loss < best) { d += `H${X(p.idx + 0.5)}V${Y(p.loss)}`; best = p.loss; }
+  d += `H${X(n)}`;
+  el("path", { d, fill: "none", stroke: "var(--ai)", "stroke-width": 2 }, s);
+  txt(s, w - m.r + 6, Y(best) + 4, `best ${f3(best)}`, { class: "lbl-strong" });
+  txt(s, X(0) + 6, m.t + 14, "high reasoning", { class: "lbl" });
+  if (above) txt(s, w - m.r, m.t - 2, `${above} programs above ${y1.toFixed(1)} not shown`, { "text-anchor": "end" });
+  const ring = el("circle", { r: 6, fill: "none", stroke: "var(--fg)", "stroke-width": 2, visibility: "hidden" }, s);
+  const hit = el("rect", { x: m.l, y: m.t, width: w - m.l - m.r, height: h - m.t - m.b, fill: "transparent" }, s);
+  hit.addEventListener("pointermove", e => {
+    const pt = s.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const q = pt.matrixTransform(s.getScreenCTM().inverse());
+    let near = null, dmin = 400;
+    for (const mk of marks) { const dd = (mk.cx - q.x) ** 2 + (mk.cy - q.y) ** 2; if (dd < dmin) { dmin = dd; near = mk; } }
+    if (!near) { ring.setAttribute("visibility", "hidden"); hideTip(); return; }
+    ring.setAttribute("cx", near.cx); ring.setAttribute("cy", near.cy); ring.setAttribute("visibility", "visible");
+    showTip(host, near.cx, near.cy, `generation ${near.p.g} · island ${near.p.i} · slot ${near.p.b}<br>loss ${f3(near.p.loss)}`);
+  });
+  hit.addEventListener("pointerleave", () => { ring.setAttribute("visibility", "hidden"); hideTip(); });
+}
+
+function drawLocked(D) {
+  const host = document.getElementById("locked"), w = 1000, h = 190, m = { l: 170, r: 40, t: 10, b: 36 };
+  const s = svg(host, w, h);
+  const items = [["winning program", D.locked.winner, "var(--ai)"], ["double Gaussian", D.locked.double_gaussian, "var(--dg)"], ["single Gaussian", D.locked.single_gaussian, "var(--dot)"]];
+  const vals = items.flatMap(([, v]) => [v.sel, v.score]);
+  const x0 = Math.floor((Math.min(...vals) - 0.2) * 5) / 5, x1 = Math.ceil((Math.max(...vals) + 0.2) * 5) / 5;
+  const X = scale(x0, x1, m.l, w - m.r), rowH = (h - m.t - m.b) / items.length;
+  const xStep = (x1 - x0) > 3 ? 1 : (x1 - x0) > 1.2 ? 0.4 : 0.2;
+  for (let v = x0; v <= x1 + 1e-9; v += xStep) {
+    el("line", { x1: X(v), x2: X(v), y1: m.t, y2: h - m.b, stroke: "var(--grid)" }, s);
+    txt(s, X(v), h - m.b + 18, v.toFixed(1), { "text-anchor": "middle" });
+  }
+  txt(s, (m.l + w - m.r) / 2, h - 2, "penalized score (lower is better)", { "text-anchor": "middle", class: "lbl" });
+  items.forEach(([name, v, c], i) => {
+    const y = m.t + rowH * (i + 0.5);
+    txt(s, m.l - 14, y + 4, `${name} · ${v.params}p`, { "text-anchor": "end", class: "lbl-strong" });
+    el("line", { x1: X(Math.min(v.sel, v.score)), x2: X(Math.max(v.sel, v.score)), y1: y, y2: y, stroke: c, "stroke-width": 2 }, s);
+    const sel = el("circle", { cx: X(v.sel), cy: y, r: 6, fill: "var(--bg)", stroke: c, "stroke-width": 2 }, s);
+    const lock = el("circle", { cx: X(v.score), cy: y, r: 6, fill: c, stroke: "var(--bg)", "stroke-width": 2 }, s);
+    txt(s, X(Math.min(v.sel, v.score)) - 12, y + 4, f3(v.score), { "text-anchor": "end", class: "lbl" });
+    for (const [node, label, val] of [[sel, "selection", v.sel], [lock, "locked test", v.score]]) {
+      const target = el("circle", { cx: node.getAttribute("cx"), cy: y, r: 12, fill: "transparent" }, s);
+      target.addEventListener("pointerenter", () => showTip(host, +node.getAttribute("cx"), y - 4, `${name} · ${label}<br>score ${f3(val)}${label === "locked test" ? ` · MSE ${f3(v.mse)}` : ""}`));
+      target.addEventListener("pointerleave", hideTip);
+    }
+  });
+}
+
+function drawHist(D, mode) {
+  document.getElementById("p-min").setAttribute("aria-pressed", mode === "min");
+  document.getElementById("p-dom").setAttribute("aria-pressed", mode === "dom");
+  const P = D.pmin, counts = mode === "min" ? P.hist : P.dom_hist, med = mode === "min" ? P.median : P.dom_median;
+  const below = mode === "min" ? P.below2 : P.dom_below2;
+  document.getElementById("pcaption").textContent = mode === "min"
+    ? `Per-cell exponent min(p₁, p₂) of the winning program on the ${P.n} locked cells, the measure in the paper's Fig. 3d. It sets the eigenspectrum decay α = 2(p + 1), so p ≈ 1 predicts α ≈ 4. ${Math.round(below * 100)}% of cells are below 2; ${Math.round(P.at_floor * 100)}% sit at the program's own lower clip of 1.0.`
+    : `Exponent of each cell's larger peak only. A small second peak can take a low p without shaping the curve much, so this is the stricter view: median ${f2(med)}, ${Math.round(below * 100)}% of cells below 2.`;
+  const host = document.getElementById("hist"); host.innerHTML = "";
+  const w = 1000, h = 300, m = { l: 56, r: 20, t: 30, b: 42 };
+  const s = svg(host, w, h);
+  const edges = P.edges, top = Math.max(...counts) * 1.08;
+  const X = scale(0.8, 3.3, m.l, w - m.r), Y = scale(0, top, h - m.b, m.t);
+  const step = top > 200 ? 100 : 25;
+  for (let v = 0; v <= top; v += step) {
+    el("line", { x1: m.l, x2: w - m.r, y1: Y(v), y2: Y(v), stroke: "var(--grid)" }, s);
+    txt(s, m.l - 8, Y(v) + 4, String(v), { "text-anchor": "end" });
+  }
+  for (let v = 1.0; v <= 3.21; v += 0.5) txt(s, X(v), h - m.b + 18, v.toFixed(1), { "text-anchor": "middle" });
+  txt(s, (m.l + w - m.r) / 2, h - 4, mode === "min" ? "min(p₁, p₂)" : "p of the larger peak", { "text-anchor": "middle", class: "lbl" });
+  txt(s, 14, Y(top / 2), "cells", { transform: `rotate(-90 14 ${Y(top / 2)})`, "text-anchor": "middle", class: "lbl" });
+  counts.forEach((c, i) => {
+    if (!c) return;
+    const x0 = X(edges[i]) + 1, x1 = X(edges[i + 1]) - 1, y = Y(c), r = Math.min(4, (x1 - x0) / 2);
+    el("path", { d: `M${x0},${Y(0)}V${y + r}Q${x0},${y} ${x0 + r},${y}H${x1 - r}Q${x1},${y} ${x1},${y + r}V${Y(0)}Z`, fill: "var(--ai)", "fill-opacity": edges[i] < 2 ? 1 : 0.45 }, s);
+    const t = el("rect", { x: x0, y: m.t, width: x1 - x0, height: Y(0) - m.t, fill: "transparent" }, s);
+    t.addEventListener("pointerenter", () => showTip(host, (x0 + x1) / 2, y, `p ${edges[i].toFixed(1)}–${edges[i + 1].toFixed(1)}<br>${c} cells`));
+    t.addEventListener("pointerleave", hideTip);
+  });
+  const vline = (v, color, label, dy, dash, anchor = "start") => {
+    el("line", { x1: X(v), x2: X(v), y1: m.t - 8, y2: Y(0), stroke: color, "stroke-width": 2, "stroke-dasharray": dash || "" }, s);
+    txt(s, X(v) + (anchor === "start" ? 6 : -6), m.t + dy, label, { class: "lbl-strong", "text-anchor": anchor });
+  };
+  vline(2, "var(--fg-3)", "Gaussian p = 2", 2, "4 4");
+  if (mode === "min") vline(1.2, "var(--paper)", "paper median 1.20", 22, "");
+  vline(med, "var(--fg)", `this run ${f2(med)}`, mode === "min" ? 42 : 22, "", "start");
+  txt(s, X(1.05), Y(0) + 32, "← program clips p at 1.0", { class: "lbl" });
+}
+
+function drawCells(D) {
+  const host = document.getElementById("cells");
+  const grid = D.grid_deg;
+  for (const c of D.examples) {
+    const box = document.createElement("div"); box.className = "cell";
+    box.innerHTML = `<h3>Cell ${c.cell}</h3><div class="meta">MSE ${f2(c.mse_w)} vs ${f2(c.mse_d)} · p₁ ${f2(c.p1)}, p₂ ${f2(c.p2)}</div>`;
+    const ch = document.createElement("div"); ch.className = "chart"; box.appendChild(ch); host.appendChild(box);
+    const w = 320, h = 220, m = { l: 34, r: 8, t: 8, b: 30 };
+    const s = svg(ch, w, h);
+    const ys = c.points.map(p => p[1]).concat(c.winner, c.double);
+    const ymax = Math.max(...ys) * 1.05, ymin = Math.min(0, Math.min(...ys));
+    const X = scale(0, 360, m.l, w - m.r), Y = scale(ymin, ymax, h - m.b, m.t);
+    const yt = ymax > 20 ? 10 : ymax > 8 ? 4 : 2;
+    for (let v = 0; v <= ymax; v += yt) { el("line", { x1: m.l, x2: w - m.r, y1: Y(v), y2: Y(v), stroke: "var(--grid)" }, s); txt(s, m.l - 5, Y(v) + 4, String(v), { "text-anchor": "end", style: "font-size:10px" }); }
+    for (const a of [0, 90, 180, 270, 360]) txt(s, X(a), h - m.b + 15, a + "°", { "text-anchor": "middle", style: "font-size:10px" });
+    for (const p of c.points) el("circle", { cx: X(p[0]), cy: Y(p[1]), r: 1.8, fill: "var(--dot)", "fill-opacity": 0.6 }, s);
+    const line = (vals, color) => el("path", { d: vals.map((v, i) => `${i ? "L" : "M"}${X(grid[i]).toFixed(1)},${Y(v).toFixed(1)}`).join(""), fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round" }, s);
+    line(c.double, "var(--dg)");
+    line(c.winner, "var(--ai)");
+    for (const mn of c.means) el("rect", { x: X(mn[0]) - 3, y: Y(mn[1]) - 3, width: 6, height: 6, rx: 1, fill: "var(--fg)", stroke: "var(--bg)", "stroke-width": 1.5 }, s);
+    const cross = el("line", { y1: m.t, y2: h - m.b, stroke: "var(--fg-3)", visibility: "hidden" }, s);
+    const hit = el("rect", { x: m.l, y: m.t, width: w - m.l - m.r, height: h - m.t - m.b, fill: "transparent" }, s);
+    hit.addEventListener("pointermove", e => {
+      const pt = s.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+      const q = pt.matrixTransform(s.getScreenCTM().inverse());
+      const i = Math.max(0, Math.min(grid.length - 1, Math.round(X.inv(q.x) / 2)));
+      cross.setAttribute("x1", X(grid[i])); cross.setAttribute("x2", X(grid[i])); cross.setAttribute("visibility", "visible");
+      showTip(ch, X(grid[i]), m.t + 4, `${Math.round(grid[i])}° · winner ${f2(c.winner[i])} · double G ${f2(c.double[i])}`);
+    });
+    hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+  }
+}
+
+function drawTime(D) {
+  const T = D.run.timings;
+  document.getElementById("time").closest("section").hidden = !T;
+  if (!T) return;
+  const st = T.stages;
+  const tick = [300, 600, 1200, 1800, 3600, 7200, 14400].find(v => T.total_s / v <= 8) || 28800;
+  const names = { estimator: "LLM · parameter estimators", translation: "LLM · translation to JAX", proposal: "LLM · program proposals", fit: "per-cell fitting", plots: "diagnostic plots", final_refit: "final refits", evaluation_matrix: "evaluation matrix", population: "population updates" };
+  const rows = Object.keys(names).filter(k => st[k]).map(k => [names[k], st[k].wall_s, st[k].calls, k]).sort((a, b) => b[1] - a[1]);
+  const host = document.getElementById("time"), w = 1000, rowH = 30, m = { l: 220, r: 120, t: 8, b: 34 };
+  const h = m.t + m.b + rowH * rows.length, s = svg(host, w, h);
+  const X = scale(0, T.total_s, m.l, w - m.r);
+  for (let v = 0; v <= T.total_s; v += tick) { el("line", { x1: X(v), x2: X(v), y1: m.t, y2: h - m.b, stroke: "var(--grid)" }, s); txt(s, X(v), h - m.b + 18, v >= 3600 && tick >= 3600 ? `${v / 3600} h` : `${v / 60} min`, { "text-anchor": "middle" }); }
+  el("line", { x1: X(T.total_s), x2: X(T.total_s), y1: m.t - 4, y2: h - m.b, stroke: "var(--fg-3)", "stroke-dasharray": "4 4" }, s);
+  txt(s, X(T.total_s) + 6, m.t + 10, `run ${(T.total_s / 60).toFixed(0)} min`, { class: "lbl-strong" });
+  rows.forEach(([name, wall, calls, k], i) => {
+    const y = m.t + i * rowH, bh = rowH - 10;
+    txt(s, m.l - 12, y + bh / 2 + 4, name, { "text-anchor": "end", class: "lbl" });
+    const color = k === "fit" ? "var(--dg)" : k.startsWith("e") || k === "translation" || k === "proposal" ? "var(--ai)" : "var(--dot)";
+    const x1 = X(wall), r = Math.min(4, (x1 - m.l) / 2);
+    el("path", { d: `M${m.l},${y}H${x1 - r}Q${x1},${y} ${x1},${y + r}V${y + bh - r}Q${x1},${y + bh} ${x1 - r},${y + bh}H${m.l}Z`, fill: k === "evaluation_matrix" ? "var(--dot)" : color }, s);
+    txt(s, x1 + 6, y + bh / 2 + 4, `${(wall / 60).toFixed(wall < 60 ? 1 : 0)} min`, { class: "lbl" });
+    const t = el("rect", { x: m.l, y, width: w - m.l - m.r, height: bh, fill: "transparent" }, s);
+    t.addEventListener("pointerenter", () => showTip(host, Math.max(x1, m.l + 40), y, `${name}<br>${calls} calls · ${Math.round(wall)} s wall`));
+    t.addEventListener("pointerleave", hideTip);
+  });
+}
+
+const PAPER_NAME = "AI model", WAVE_NAME = "AI model + wave";
+const winnerKey = A => Object.keys(A.models).find(k => k.startsWith("EDGAR winner"));
+
+function renderPaper(A) {
+  drawWaveCells(A);
+  drawWaveHists(A);
+  drawSpectrum(A, "eligible");
+  document.getElementById("spec-eligible").onclick = () => drawSpectrum(A, "eligible");
+  document.getElementById("spec-all").onclick = () => drawSpectrum(A, "all");
+  document.getElementById("spec-all").textContent = `all ${A.all_cells_count.toLocaleString()} cells`;
+  drawValidation(A);
+  drawAblation(A);
+}
+
+function axesLog(s, X, Y, m, w, h, xt, yt, xlabel, ylabel) {
+  for (const v of yt) { el("line", { x1: m.l, x2: w - m.r, y1: Y(v), y2: Y(v), stroke: "var(--grid)" }, s); txt(s, m.l - 8, Y(v) + 4, String(v), { "text-anchor": "end" }); }
+  for (const v of xt) txt(s, X(v), h - m.b + 18, String(v), { "text-anchor": "middle" });
+  txt(s, (m.l + w - m.r) / 2, h - 4, xlabel, { "text-anchor": "middle", class: "lbl" });
+  txt(s, 14, (m.t + h - m.b) / 2, ylabel, { transform: `rotate(-90 14 ${(m.t + h - m.b) / 2})`, "text-anchor": "middle", class: "lbl" });
+}
+
+function logChart(host, series, opts) {
+  host.innerHTML = "";
+  const w = 1000, h = opts.h || 420, m = { l: 64, r: 150, t: 14, b: 42 };
+  const s = svg(host, w, h);
+  const nmax = opts.nmax || 128, lo = opts.lo || 1e-3;
+  const hi = Math.max(...series.flatMap(x => x.values.slice(0, nmax))) * 1.6;
+  const lx = scale(0, Math.log10(nmax), m.l, w - m.r), ly = scale(Math.log10(lo), Math.log10(hi), h - m.b, m.t);
+  const X = v => lx(Math.log10(v)), Y = v => ly(Math.log10(Math.max(v, lo)));
+  el("rect", { x: X(11), y: m.t, width: X(49) - X(11), height: h - m.t - m.b, fill: "var(--panel)" }, s);
+  txt(s, X(11) + 6, m.t + 14, "fit range 10 < n < 50", { class: "lbl" });
+  const yt = []; for (let e = Math.ceil(Math.log10(lo)); e <= Math.log10(hi); e++) yt.push(10 ** e);
+  axesLog(s, X, Y, m, w, h, [1, 2, 5, 10, 20, 50, 100].filter(v => v <= nmax), yt.map(v => +v.toPrecision(1)), "dimension n", "variance");
+  for (const sr of series) {
+    const vals = sr.values.slice(0, nmax);
+    if (sr.fit) {
+      const f = n => Math.exp(sr.fit.power_intercept) * n ** -sr.fit.alpha;
+      el("path", { d: `M${X(8)},${Y(f(8))}L${X(64)},${Y(f(64))}`, stroke: sr.color, "stroke-width": 1.5, "stroke-dasharray": "5 4", fill: "none", opacity: 0.8 }, s);
+    }
+    if (sr.style === "line") {
+      let d = ""; vals.forEach((v, i) => { if (v > lo) d += `${d && vals[i - 1] > lo ? "L" : "M"}${X(i + 1).toFixed(1)},${Y(v).toFixed(1)}`; });
+      el("path", { d, stroke: sr.color, "stroke-width": 2, fill: "none", "stroke-linejoin": "round" }, s);
+    } else {
+      vals.forEach((v, i) => {
+        const cx = X(i + 1);
+        if (v <= 0) { const cy = h - m.b - 6; el("path", { d: `M${cx - 3},${cy - 3}L${cx + 3},${cy + 3}M${cx - 3},${cy + 3}L${cx + 3},${cy - 3}`, stroke: sr.color, "stroke-width": 1.5 }, s); return; }
+        el("circle", sr.style === "ring" ? { cx, cy: Y(v), r: 4, fill: "none", stroke: sr.color, "stroke-width": 1.5 } : { cx, cy: Y(v), r: 3.2, fill: sr.color, stroke: "var(--bg)", "stroke-width": 1 }, s);
+      });
+    }
+    const last = vals.findLastIndex(v => v > lo);
+    if (sr.label && last >= 0) txt(s, w - m.r + 8, Y(vals[Math.min(last, nmax - 1)]) + 4, sr.label, { class: "lbl" });
+  }
+  const cross = el("line", { y1: m.t, y2: h - m.b, stroke: "var(--fg-3)", visibility: "hidden" }, s);
+  const hit = el("rect", { x: m.l, y: m.t, width: w - m.l - m.r, height: h - m.t - m.b, fill: "transparent" }, s);
+  hit.addEventListener("pointermove", e => {
+    const pt = s.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const q = pt.matrixTransform(s.getScreenCTM().inverse());
+    const n = Math.max(1, Math.min(nmax, Math.round(10 ** lx.inv(q.x))));
+    cross.setAttribute("x1", X(n)); cross.setAttribute("x2", X(n)); cross.setAttribute("visibility", "visible");
+    showTip(host, X(n), m.t + 20, `n = ${n}<br>` + series.map(sr => `${sr.name}: ${sr.values[n - 1].toPrecision(3)}`).join("<br>"));
+  });
+  hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+}
+
+function drawSpectrum(A, which) {
+  document.getElementById("spec-eligible").setAttribute("aria-pressed", which === "eligible");
+  document.getElementById("spec-all").setAttribute("aria-pressed", which === "all");
+  const models = which === "eligible" ? A.models : A.all_cells_models;
+  const data = which === "eligible" ? A.data.eligible : A.data.all_cells;
+  const wk = winnerKey(A);
+  const series = [
+    { name: "recording (rcvPCA)", values: data.spectrum, color: "var(--fg)", style: "dot", fit: data.log, label: `data α ${f2(data.log.alpha)}` },
+    { name: "double Gaussian", values: models["Double Gaussian"].pca.spectrum, color: "var(--dg)", style: "line", label: `double G α ${f2(models["Double Gaussian"].pca.log.alpha)}` },
+    { name: "paper model", values: models[PAPER_NAME].pca.spectrum, color: "var(--paper)", style: "line", label: `paper α ${f2(models[PAPER_NAME].pca.log.alpha)}` },
+    { name: "EDGAR winner", values: models[wk].pca.spectrum, color: "var(--ai)", style: "line", label: `winner α ${f2(models[wk].pca.log.alpha)}` },
+  ];
+  document.getElementById("spec-legend").innerHTML = `
+    <span><i class="key dot" style="background:var(--fg)"></i>recording, rcvPCA (× = negative estimate)</span>
+    <span><i class="key" style="background:var(--dg)"></i>double Gaussian fits</span>
+    <span><i class="key" style="background:var(--paper)"></i>paper model fits</span>
+    <span><i class="key" style="background:var(--ai)"></i>EDGAR winner fits</span>
+    <span><i class="key dash" style="color:var(--fg)"></i>power-law fit to the recording</span>`;
+  document.getElementById("spec-cap").textContent = `Variance along each principal dimension of the population's tuning. The recording is measured with the paper's rcvPCA (256 direction bins, 6 repeats, 60 repeat assignments averaged); model curves use plain PCA. Eigenvalues come in steps of about four because each stimulus frequency contributes a cosine and a sine.`;
+  logChart(document.getElementById("spectrum"), series, {});
+  const rows = [["Recording", data, A.paper.data_alpha]].concat(
+    [["Double Gaussian", "Double Gaussian", null], ["Paper model (refit here)", PAPER_NAME, A.paper.ai_model_alpha], ["EDGAR winner", wk, null]]
+      .map(([label, key, ref]) => [label, models[key].pca, ref]));
+  document.getElementById("alpha-table").innerHTML = `<thead><tr><th></th><th class="n">α, log fit</th><th class="n">α, linear fit</th><th class="n">Power law vs Gaussian decay error</th><th class="n">Paper α</th></tr></thead><tbody>${rows.map(([label, v, ref]) => {
+    const ratio = v.log.gaussian_mse / v.log.power_mse;
+    return `<tr><td>${label}</td><td class="n">${f2(v.log.alpha)}</td><td class="n">${f2(v.linear.alpha)}</td><td class="n">${ratio >= 1 ? `power law ${ratio.toFixed(1)}× better` : `Gaussian ${(1 / ratio).toFixed(1)}× better`}</td><td class="n">${ref ?? "–"}</td></tr>`;
+  }).join("")}</tbody>`;
+}
+
+function drawValidation(A) {
+  const v = A.models[PAPER_NAME];
+  logChart(document.getElementById("validation"), [
+    { name: "ground truth", values: v.pca.spectrum, color: "var(--fg-3)", style: "dot", label: `truth α ${f2(v.pca.log.alpha)}` },
+    { name: "rcvPCA, independent noise", values: v.rcvpca_with_noise.spectrum, color: "var(--ai)", style: "dot", label: `recovered α ${f2(v.rcvpca_with_noise.log.alpha)}` },
+    { name: "rcvPCA, paper recipe", values: v.rcvpca_with_paper_noise.spectrum, color: "var(--dg)", style: "ring", label: `paper recipe α ${f2(v.rcvpca_with_paper_noise.log.alpha)}` },
+  ], { h: 360, nmax: 64 });
+}
+
+function drawAblation(A) {
+  const wk = winnerKey(A);
+  const rows = [["Gaussian+p", "Gaussian+p", "var(--paper)"], ["Gaussian+p+asym", "Gaussian+p+asym", "var(--paper)"], ["paper model", PAPER_NAME, "var(--paper)"], ["paper model + wave", WAVE_NAME, "var(--ai)"], ["EDGAR winner", wk, "var(--ai)"]]
+    .filter(r => A.models[r[1]]);
+  const host = document.getElementById("ablation"); host.innerHTML = "";
+  const w = 1000, rowH = 38, m = { l: 230, r: 150, t: 8, b: 36 }, h = m.t + m.b + rowH * rows.length;
+  const s = svg(host, w, h);
+  const vals = rows.map(r => A.models[r[1]].r2.gain_over_double_gaussian.median);
+  const top = Math.max(...vals) * 1.15;
+  const X = scale(0, top, m.l, w - m.r);
+  const step = top > 0.02 ? 0.005 : 0.001;
+  for (let v = 0; v <= top + 1e-9; v += step) { el("line", { x1: X(v), x2: X(v), y1: m.t, y2: h - m.b, stroke: "var(--grid)" }, s); txt(s, X(v), h - m.b + 18, v.toFixed(3), { "text-anchor": "middle" }); }
+  txt(s, (m.l + w - m.r) / 2, h - 2, "median gain in held-out R² over the double Gaussian", { "text-anchor": "middle", class: "lbl" });
+  rows.forEach(([label, key, color], i) => {
+    const e = A.models[key], g = e.r2.gain_over_double_gaussian, y = m.t + i * rowH, bh = rowH - 12, x1 = X(Math.max(0, g.median)), r = Math.min(4, (x1 - m.l) / 2);
+    txt(s, m.l - 12, y + bh / 2 + 4, `${label} · ${e.parameters}p`, { "text-anchor": "end", class: "lbl-strong" });
+    if (x1 > m.l + 1) el("path", { d: `M${m.l},${y}H${x1 - r}Q${x1},${y} ${x1},${y + r}V${y + bh - r}Q${x1},${y + bh} ${x1 - r},${y + bh}H${m.l}Z`, fill: color }, s);
+    txt(s, x1 + 6, y + bh / 2 + 4, `+${g.median.toFixed(4)} · better on ${Math.round(g.share_better * 100)}%`, { class: "lbl" });
+    const t = el("rect", { x: m.l, y, width: w - m.l - m.r, height: bh, fill: "transparent" }, s);
+    t.addEventListener("pointerenter", () => showTip(host, x1, y, `${label}<br>median R² ${f3(e.r2.median)} · mean gain ${e.r2.gain_over_double_gaussian.mean.toFixed(4)}`));
+    t.addEventListener("pointerleave", hideTip);
+  });
+}
+
+function drawWaveCells(A) {
+  const host = document.getElementById("wave-cells"); host.innerHTML = "";
+  const W = A.wave, grid = W.grid_deg;
+  for (const c of W.examples) {
+    const box = document.createElement("div"); box.className = "cell";
+    const gain = c.r2[WAVE_NAME] - c.r2[PAPER_NAME];
+    box.innerHTML = `<h3>Cell #${c.row}</h3><div class="meta">R² ${f3(c.r2[PAPER_NAME])} → ${f3(c.r2[WAVE_NAME])} with wave (+${gain.toFixed(3)})</div>`;
+    const top = document.createElement("div"); top.className = "chart"; box.appendChild(top);
+    const bottom = document.createElement("div"); bottom.className = "chart"; box.appendChild(bottom);
+    host.appendChild(box);
+    const w = 320, m = { l: 34, r: 8, t: 8, b: 22 };
+    const X = scale(0, 360, m.l, w - m.r);
+    const line = (s, Y, vals, color, extra = {}) => el("path", { d: vals.map((v, i) => `${i ? "L" : "M"}${X(grid[i]).toFixed(1)},${Y(v).toFixed(1)}`).join(""), fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round", ...extra }, s);
+    const frame = (s, Y, ymin, ymax, h) => {
+      const st = (ymax - ymin) > 20 ? 10 : (ymax - ymin) > 8 ? 4 : (ymax - ymin) > 3 ? 2 : 1;
+      for (let v = Math.ceil(ymin / st) * st; v <= ymax; v += st) { el("line", { x1: m.l, x2: w - m.r, y1: Y(v), y2: Y(v), stroke: v === 0 ? "var(--fg-3)" : "var(--grid)" }, s); txt(s, m.l - 5, Y(v) + 4, String(v), { "text-anchor": "end", style: "font-size:10px" }); }
+      for (const a of [0, 90, 180, 270, 360]) txt(s, X(a), h - m.b + 15, a + "°", { "text-anchor": "middle", style: "font-size:10px" });
+    };
+    const fits = c.curves, h1 = 200;
+    const ys = c.means.map(p => p[1]).concat(...Object.values(fits));
+    const y1max = Math.max(...ys) * 1.08, y1min = Math.min(0, ...ys);
+    const s1 = svg(top, w, h1), Y1 = scale(y1min, y1max, h1 - m.b, m.t);
+    frame(s1, Y1, y1min, y1max, h1);
+    line(s1, Y1, fits["Double Gaussian"], "var(--dg)");
+    line(s1, Y1, fits[PAPER_NAME], "var(--paper)");
+    line(s1, Y1, fits[WAVE_NAME], "var(--ai)");
+    for (const mn of c.means) el("rect", { x: X(mn[0]) - 3, y: Y1(mn[1]) - 3, width: 6, height: 6, rx: 1, fill: "var(--fg)", stroke: "var(--bg)", "stroke-width": 1.5 }, s1);
+    const comp = c.components, h2 = 160;
+    const cv = [].concat(comp.baseline, comp.peak_1, comp.peak_2, comp.wave);
+    const y2max = Math.max(...cv) * 1.08, y2min = Math.min(0, ...cv) * 1.15;
+    const s2 = svg(bottom, w, h2), Y2 = scale(y2min, y2max, h2 - m.b, m.t);
+    frame(s2, Y2, y2min, y2max, h2);
+    line(s2, Y2, comp.baseline, "var(--dot)");
+    line(s2, Y2, comp.peak_1, "var(--paper)");
+    line(s2, Y2, comp.peak_2, "var(--paper)", { "stroke-dasharray": "5 4" });
+    el("path", { d: comp.wave.map((v, i) => `${i ? "L" : "M"}${X(grid[i]).toFixed(1)},${Y2(v).toFixed(1)}`).join("") + `L${X(360)},${Y2(0)}L${X(0)},${Y2(0)}Z`, fill: "var(--ai)", "fill-opacity": 0.15 }, s2);
+    line(s2, Y2, comp.wave, "var(--ai)", { "stroke-width": 2.5 });
+    for (const [s, Y, hh, ch, fmt] of [[s1, Y1, h1, top, i => `${Math.round(grid[i])}° · double G ${f2(fits["Double Gaussian"][i])} · paper ${f2(fits[PAPER_NAME][i])} · + wave ${f2(fits[WAVE_NAME][i])}`], [s2, Y2, h2, bottom, i => `${Math.round(grid[i])}° · peak 1 ${f2(comp.peak_1[i])} · peak 2 ${f2(comp.peak_2[i])} · wave ${f2(comp.wave[i])}`]]) {
+      const cross = el("line", { y1: m.t, y2: hh - m.b, stroke: "var(--fg-3)", visibility: "hidden" }, s);
+      const hit = el("rect", { x: m.l, y: m.t, width: w - m.l - m.r, height: hh - m.t - m.b, fill: "transparent" }, s);
+      hit.addEventListener("pointermove", e => {
+        const pt = s.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+        const q = pt.matrixTransform(s.getScreenCTM().inverse());
+        const i = Math.max(0, Math.min(grid.length - 1, Math.round(X.inv(q.x) / 2)));
+        cross.setAttribute("x1", X(grid[i])); cross.setAttribute("x2", X(grid[i])); cross.setAttribute("visibility", "visible");
+        showTip(ch, X(grid[i]), m.t + 4, fmt(i));
+      });
+      hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+    }
+  }
+}
+
+function barHist(host, counts, edges, opts) {
+  host.innerHTML = "";
+  const w = 480, h = 240, m = { l: 44, r: 10, t: 12, b: 40 };
+  const s = svg(host, w, h);
+  const all = counts.concat(opts.outline || []), top = Math.max(...all) * 1.1;
+  const X = scale(edges[0], edges[edges.length - 1], m.l, w - m.r), Y = scale(0, top, h - m.b, m.t);
+  const st = top > 400 ? 200 : top > 150 ? 50 : 25;
+  for (let v = 0; v <= top; v += st) { el("line", { x1: m.l, x2: w - m.r, y1: Y(v), y2: Y(v), stroke: "var(--grid)" }, s); txt(s, m.l - 6, Y(v) + 4, String(v), { "text-anchor": "end" }); }
+  for (const t of opts.ticks) txt(s, X(t), h - m.b + 16, opts.fmt(t), { "text-anchor": "middle" });
+  txt(s, (m.l + w - m.r) / 2, h - 4, opts.xlabel, { "text-anchor": "middle", class: "lbl" });
+  counts.forEach((c, i) => {
+    if (!c) return;
+    const x0 = X(edges[i]) + 1, x1 = X(edges[i + 1]) - 1, y = Y(c), r = Math.min(3, (x1 - x0) / 2);
+    el("path", { d: `M${x0},${Y(0)}V${y + r}Q${x0},${y} ${x0 + r},${y}H${x1 - r}Q${x1},${y} ${x1},${y + r}V${Y(0)}Z`, fill: "var(--ai)" }, s);
+  });
+  if (opts.outline) {
+    let d = `M${X(edges[0])},${Y(0)}`;
+    opts.outline.forEach((c, i) => { d += `V${Y(c)}H${X(edges[i + 1])}`; });
+    el("path", { d: d + `V${Y(0)}`, fill: "none", stroke: "var(--fg)", "stroke-width": 1.5 }, s);
+  }
+  if (opts.zero !== undefined) el("line", { x1: X(opts.zero), x2: X(opts.zero), y1: m.t, y2: Y(0), stroke: "var(--fg-3)", "stroke-dasharray": "4 4" }, s);
+  counts.forEach((c, i) => {
+    const t = el("rect", { x: X(edges[i]), y: m.t, width: X(edges[i + 1]) - X(edges[i]), height: Y(0) - m.t, fill: "transparent" }, s);
+    t.addEventListener("pointerenter", () => showTip(host, (X(edges[i]) + X(edges[i + 1])) / 2, Y(Math.max(c, opts.outline ? opts.outline[i] : 0)), `${opts.fmt(edges[i])} to ${opts.fmt(edges[i + 1])}<br>${opts.tip(c, i)}`));
+    t.addEventListener("pointerleave", hideTip);
+  });
+}
+
+function drawWaveHists(A) {
+  const W = A.wave, edges = W.size_edges;
+  document.getElementById("wave-size-cap").innerHTML = `Wave height as a share of the main peak. Bars: paper model + wave (median ${Math.round(W.median_size * 100)}%). Line: the winner's own cosine terms (median ${Math.round(W.winner_median_size * 100)}%).`;
+  barHist(document.getElementById("wave-size"), W.size_hist, edges, { outline: W.winner_size_hist, ticks: [0, 0.25, 0.5, 0.75, 1], fmt: v => `${Math.round(v * 100)}%`, xlabel: "wave height ÷ main peak height (≥100% pooled)", tip: (c, i) => `${c} cells (paper + wave)<br>${W.winner_size_hist[i]} cells (winner)` });
+  const G = W.r2_gain_over_ai_model, ge = G.hist.map((_, i) => -0.02 + i * 0.005).concat([0.06]);
+  document.getElementById("wave-gain-cap").innerHTML = `Per-cell change in held-out R² from adding the wave to the paper model. Better on ${Math.round(G.share_better * 100)}% of cells; median ${G.median >= 0 ? "+" : ""}${G.median.toFixed(4)}.`;
+  barHist(document.getElementById("wave-gain"), G.hist, ge, { ticks: [-0.02, 0, 0.02, 0.04, 0.06], fmt: v => (v > 0 ? "+" : "") + v.toFixed(2), xlabel: "R² gain (ends pooled)", zero: 0, tip: c => `${c} cells` });
+}
+</script>

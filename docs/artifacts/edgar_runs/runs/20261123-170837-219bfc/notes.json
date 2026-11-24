@@ -1,0 +1,13 @@
+{
+ "equation_title": "the paper's form plus a wave",
+ "equation_caption": "Both sum two asymmetric generalized-Gaussian peaks over a baseline. Blue terms are this run's additions. The second peak sits at the antipode plus a small offset δ, and each peak has one width skewed by an asymmetry factor instead of separate left and right widths. <code>wrap_asymmetry</code> is never fitted (the estimator returns 14 values for 15 slots), so the extra wave is just m cos(θ − ψ).",
+ "equation_html": "<div><span class=\"term\">Paper (11 params):</span>&ensp;<span class=\"term\">f(θ) = b + A₁ exp[−½ (|θ−φ₁| / σ₁±)<sup>p₁</sup>] + A₂ exp[−½ (|θ−φ₂| / σ₂±)<sup>p₂</sup>]</span></div><div><span class=\"term\">This run (14 fitted):</span>&ensp;<span class=\"term\">f(θ) = b + A₁ exp[−½ (|d₁| / σ₁ e<sup>±a₁</sup>)<sup>p₁</sup>] + A₂ exp[−½ (|d₂| / σ₂ e<sup>±a₂</sup>)<sup>p₂</sup>]</span> <span class=\"term new\">+ m cos(θ − ψ)</span>, <span class=\"term\">d₂ = θ − φ − π <span class=\"new\">− δ</span></span></div>",
+ "caveats": [
+  "<strong>Recall, not discovery.</strong> A fitted exponent appeared in generation 0 and in 441 of 470 scored programs. The paper's form took several generations to emerge; here it was the first guess.",
+  "<strong>The wave barely matters.</strong> Added to the paper's model it lifts median held-out R² by 0.0001 and helps 54% of cells, close to a coin flip. A few cells with a lopsided baseline gain a lot (Figure 5).",
+  "<strong>Dead parameters.</strong> <code>edge_boost</code> is fitted but never used, and <code>wrap_asymmetry</code> is never fitted. The winner is effectively a 13-parameter model charged for 14.",
+  "<strong>Exponent floor.</strong> The program clips p at 1, and about half the locked cells sit there. Refitting the paper's own model (clip at 0.1) on our cells gives a median min(p₁, p₂) of 1.06, against the paper's 1.20.",
+  "<strong>α does not match the paper's numbers.</strong> On the same recording we get α ≈ 2.7 (log fit) or 3.8 (linear fit) for the data, against 4.26, and 3.4 for the paper's model against 4.34. The paper does not state the fit space, cells or response scaling, and each moves α by up to 1. What does reproduce: the AI-family spectra decay more slowly than the double Gaussian's (3.4 vs 4.4).",
+  "<strong>Different fitter.</strong> Programs are fitted with bounded Levenberg–Marquardt instead of upstream's Adam; scores agree to within about 0.7%."
+ ]
+}
