@@ -185,7 +185,8 @@ def decode(genome, config):
         lines.append(f"    x{index} = {INPUT_SIGNALS[index]}")
     for key in order:
         terms = _terms(key, incoming, weight_names, input_keys)
-        inner = f"{bias_names[key]} + ({' + '.join(terms) if terms else '0.0'})"
+        terms = terms or ["jnp.zeros_like(theta)"]
+        inner = f"{bias_names[key]} + ({' + '.join(terms)})"
         inner = f"jnp.clip({inner}, -{PREACTIVATION_BOUND}, {PREACTIVATION_BOUND})"
         if key in output_keys:
             lines.append(f"    out = {inner}")

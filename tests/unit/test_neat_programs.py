@@ -96,6 +96,23 @@ def test_a_new_hidden_node_changes_the_architecture_and_parameter_count():
     assert jax.jit(model)(theta, *params).shape == theta.shape
 
 
+def test_a_genome_without_enabled_connections_predicts_an_array():
+    population_, config = population()
+    genome = next(iter(population_.population.values()))
+    for connection in genome.connections.values():
+        connection.enabled = False
+    program = neat_programs.decode(genome, config)
+
+    assert program.connections == 0
+    assert program.n_params == 1
+    model = neat_programs.load(program.model_code, "neuron_model")
+    theta = jnp.linspace(0.0, 2 * math.pi, 16, endpoint=False)
+    fitted = jax.jit(model)(theta, program.parameter_defaults[0])
+
+    assert fitted.shape == theta.shape
+    assert np.allclose(fitted, fitted[0])
+
+
 def test_generated_source_exposes_no_globals_beyond_jax_and_numpy():
     population_, config = population()
     genome = next(iter(population_.population.values()))

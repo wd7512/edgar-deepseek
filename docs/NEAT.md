@@ -73,3 +73,5 @@ step size, not by the model class; extra neurons mostly added parameters and noi
   the cells, not that it recovers the paper's mechanism.
 - One seed, one host. The 0.18 locked-cell margin over the double Gaussian has not been checked
   across seeds, and the search needed 20 generations to find it.
+- The 20-generation run predates a fix for genomes whose connections were all disabled: 19 of
+  1,920 decoded to a scalar and were skipped. They are constant curves and could not have won.
