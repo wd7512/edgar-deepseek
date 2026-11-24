@@ -397,7 +397,6 @@ function drawMainTable(all) {
   });
   const heldVsDG = m => 100 * (m.split_errors.all.held_out / DGM.split_errors.all.held_out - 1);
   const gap = m => m.split_errors.all.held_out - m.split_errors.all.fit;
-  const recAlpha = base ? base.data.eligible.log.alpha : null;
   const per = f => runs.map(r => (r ? f(r) : dash));
   const perA = (f, score) => ({ vals: per(r => (r.M ? f(r.M, r) : na)), score: score && runs.map(r => (r && r.M ? score(r.M) : null)) });
   const rows = [
@@ -417,10 +416,22 @@ function drawMainTable(all) {
     { label: "Fit-to-held-out error gap", hint: "how much each fit chases noise; a rigid model also has a small gap", dg: DGM ? f3(gap(DGM)) : na, paper: P ? f3(gap(P)) : na, ...perA(m => f3(gap(m))) },
     { label: "Peakiness, median min(p₁, p₂)", hint: "2 is a Gaussian peak, lower is sharper; the paper found 1.20", dg: "2 (fixed)", paper: `1.20${P && P.peakiness ? sub(`${f2(P.peakiness.median_min_p)} refitted here`) : ""}`,
       vals: per(r => (r.M && r.M.peakiness ? `${f2(r.M.peakiness.median_min_p)}${sub(`${Math.round(r.D.pmin.at_floor * 100)}% of locked-test neurons at its floor of ${r.D.pmin.floor ?? 1}`)}` : na)) },
-    { group: "Population geometry" },
-    { label: "Eigenspectrum decay α of the recording", hint: "the target each model's curves should match", span: base ? `4.26 in the paper · ${f2(recAlpha)} measured here (log fit; ${f2(base.data.eligible.linear.alpha)} with a linear fit)` : "4.26 in the paper" },
-    { label: "Eigenspectrum decay α of the fitted curves", hint: `closer to the recording's ${recAlpha ? f2(recAlpha) : "value"} is better`, dg: DGM ? f2(DGM.pca.log.alpha) : na, paper: P ? `${f2(P.pca.log.alpha)}${sub("4.34 in the paper")}` : "4.34",
-      ...perA(m => f2(m.pca.log.alpha), m => -Math.abs(m.pca.log.alpha - recAlpha)), scoreBase: DGM ? [-Math.abs(DGM.pca.log.alpha - recAlpha), -Math.abs(P.pca.log.alpha - recAlpha)] : null },
+    ...[["eligible", "models", `the ${base ? base.cells.toLocaleString() : ""} reliable neurons`, "4.26 in the paper", "4.34 in the paper"],
+        ["all", "all_cells_models", `all ${base ? base.all_cells_count.toLocaleString() : ""} responsive neurons`, null, null]].flatMap(([key, modelsKey, who, paperRec, paperFit]) => {
+      if (!base) return [];
+      const rec = key === "eligible" ? base.data.eligible : base.data.all_cells;
+      const ms = base[modelsKey], dg = ms["Double Gaussian"], pe = ms[PAPER_NAME];
+      const close = a => -Math.abs(a - rec.log.alpha);
+      const winners = all.map(([, A]) => (A ? A[modelsKey][winnerKey(A)] : null));
+      return [
+        { group: `Whole-population shape (eigenspectrum decay α) · ${who}` },
+        { label: "α of the real neurons", hint: key === "eligible" ? "Stack every neuron's tuning curve and split the population's activity into its main patterns (PCA). α is how fast each further pattern explains less: higher α means a few smooth patterns dominate. This is the target." : "as above, on every responsive neuron", span: `${f2(rec.log.alpha)} measured here${sub(`${f2(rec.linear.alpha)} with a different slope-fitting method${paperRec ? `; ${paperRec}` : ""}`)}` },
+        { label: "α of each model's fitted curves", hint: key === "eligible" ? `the same measure on the curves each model fitted to those neurons; closer to the real ${f2(rec.log.alpha)} means the model reproduces the population as a whole` : `closer to the real ${f2(rec.log.alpha)} is better`,
+          dg: f2(dg.pca.log.alpha), paper: `${f2(pe.pca.log.alpha)}${paperFit ? sub(paperFit) : ""}`,
+          vals: winners.map(m => (m ? f2(m.pca.log.alpha) : na)),
+          score: [close(dg.pca.log.alpha), close(pe.pca.log.alpha), ...winners.map(m => (m ? close(m.pca.log.alpha) : null))] },
+      ];
+    }),
   ];
   const ncol = 2 + all.length;
   const cell = (v, best) => {
