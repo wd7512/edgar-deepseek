@@ -56,16 +56,7 @@ ds, _, _, dp = score_program(
 wp, dp = np.asarray(wp), np.asarray(dp)
 names = [n for n in inspect.signature(wm).parameters if n != "theta"]
 exponents = fitted_exponents(names, wp, w["jax_code"])
-if exponents is None:
-    raise SystemExit(
-        f"Winner {w['id']} has no pair of peak exponents; the page's peakiness figure needs one."
-    )
-pc1, pc2 = exponents
-low, high = clip_bounds(w["jax_code"], exponent_groups(names)[0][0])
-low, high = (low, high) if np.isfinite(low) and np.isfinite(high) else (0.0, 4.0)
-amps = amplitude_pair(names)
-a1, a2 = (wp[:, names.index(a)] for a in amps) if amps else (None, None)
-pmin = np.minimum(pc1, pc2)
+pc1, pc2 = exponents if exponents is not None else (None, None)
 
 grid = np.linspace(0, 2 * np.pi, 181)
 pred_w = np.asarray(jax.vmap(lambda p: wm(jnp.asarray(grid), *p))(jnp.asarray(wp)))
@@ -94,8 +85,8 @@ for k in pick:
     examples.append(
         {
             "cell": int(c),
-            "p1": float(pc1[k]),
-            "p2": float(pc2[k]),
+            "p1": float(pc1[k]) if pc1 is not None else None,
+            "p2": float(pc2[k]) if pc2 is not None else None,
             "points": [
                 [round(float(a) * 180 / np.pi, 1), round(float(v), 3)] for a, v in zip(xa, ya, strict=True)
             ],
@@ -107,12 +98,39 @@ for k in pick:
         }
     )
 
-bins = np.arange(low, high + 0.05, 0.1)
-hist, edges = np.histogram(pmin, bins=bins)
+
+def peakiness():
+    """Summary of the winner's sharper peak exponent per locked cell, or None if it has no exponent pair."""
+    if pc1 is None or pc2 is None:
+        return None
+    low, high = clip_bounds(w["jax_code"], exponent_groups(names)[0][0])
+    low, high = (low, high) if np.isfinite(low) and np.isfinite(high) else (0.0, 4.0)
+    amps = amplitude_pair(names)
+    a1, a2 = (wp[:, names.index(a)] for a in amps) if amps else (None, None)
+    pmin = np.minimum(pc1, pc2)
+    bins = np.arange(low, high + 0.05, 0.1)
+    hist, edges = np.histogram(pmin, bins=bins)
+    pdom = np.where(a1 >= a2, pc1, pc2) if amps else None
+    return {
+        "median": float(np.median(pmin)),
+        "q1": float(np.percentile(pmin, 25)),
+        "q3": float(np.percentile(pmin, 75)),
+        "below2": float(np.mean(pmin < 2)),
+        "at_floor": float(np.mean(pmin <= low + 0.001)),
+        "floor": low,
+        "ceiling": high,
+        "hist": hist.tolist(),
+        "edges": [round(e, 2) for e in edges.tolist()],
+        "second_lobe_share": float(np.mean(a2 > 0.1)) if amps else None,
+        "n": int(len(cells)),
+        "dom_hist": np.histogram(pdom, bins=bins)[0].tolist() if amps else None,
+        "dom_median": float(np.median(pdom)) if amps else None,
+        "dom_below2": float(np.mean(pdom < 2)) if amps else None,
+    }
+
+
 gens = rep["per_generation"]
 first_p = rep["first_generation_with_fitted_exponent"]
-pdom = np.where(a1 >= a2, pc1, pc2) if amps else None
-hist_dom = np.histogram(pdom, bins=bins)[0].tolist() if amps else None
 data = {
     "run": {
         "id": man["run_id"],
@@ -121,7 +139,7 @@ data = {
         "scored": rep["programs_scored"],
         "sha": man["repo_sha"][:7],
         "model": man["models"]["proposer"],
-        "stopped_early": man.get("recovered"),
+        "stopped_early": man.get("recovered") or man.get("stopped_early"),
         "iterations": man["iterations"],
         "list_cost_usd": rep.get("list_cost_usd", 0.0),
         "timings": man["timings"],
@@ -153,22 +171,7 @@ data = {
     "winner_code": w["code"].split('"""')[0] + "".join(w["code"].split('"""')[2:])
     if w["code"].count('"""') >= 2
     else w["code"],
-    "pmin": {
-        "median": float(np.median(pmin)),
-        "q1": float(np.percentile(pmin, 25)),
-        "q3": float(np.percentile(pmin, 75)),
-        "below2": float(np.mean(pmin < 2)),
-        "at_floor": float(np.mean(pmin <= low + 0.001)),
-        "floor": low,
-        "ceiling": high,
-        "hist": hist.tolist(),
-        "edges": [round(e, 2) for e in edges.tolist()],
-        "second_lobe_share": float(np.mean(a2 > 0.1)) if amps else None,
-        "n": int(len(cells)),
-        "dom_hist": hist_dom,
-        "dom_median": float(np.median(pdom)) if amps else None,
-        "dom_below2": float(np.mean(pdom < 2)) if amps else None,
-    },
+    "pmin": peakiness(),
     "per_cell_gain": {
         "trials": "held-out half",
         "median": float(np.median(gain)),
@@ -184,4 +187,4 @@ data = {
 }
 OUT.write_text(json.dumps(data))
 print(json.dumps({k: data[k] for k in ("per_cell_gain", "exp_programs", "first_exponent_gen")}, indent=1))
-print(len(programs), data["pmin"]["dom_median"], data["pmin"]["dom_below2"], [e["cell"] for e in examples])
+print(len(programs), data["pmin"] and data["pmin"]["dom_median"], [e["cell"] for e in examples])
