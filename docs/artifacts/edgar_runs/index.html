@@ -54,7 +54,11 @@ header { display: grid; gap: 16px; }
 .lede { font-size: 19px; color: var(--fg-2); max-width: 760px; }
 table.summary tr.group td { font: 500 12px/1.4 var(--font-data); color: var(--fg-3); letter-spacing: 0.04em; text-transform: uppercase; padding-top: 18px; }
 table.summary td:first-child { color: var(--fg-2); }
-table.summary td .sub { display: inline; margin-left: 6px; }
+table.summary td .sub, table.summary th .sub { display: block; font-size: 13px; color: var(--fg-3); text-transform: none; letter-spacing: 0; font-family: var(--font-body); font-weight: 400; }
+table.summary .hint { display: block; font-size: 13px; color: var(--fg-3); max-width: 300px; }
+table.summary td.best { font-weight: 600; color: var(--fg); }
+table.summary .tag { font: 500 11px/1 var(--font-data); text-transform: uppercase; letter-spacing: 0.04em; color: var(--bg); background: var(--fg); border-radius: 3px; padding: 2px 5px; vertical-align: 1px; }
+table.summary .muted { color: var(--fg-3); }
 .flow { display: grid; grid-template-columns: 1fr 28px 1fr 28px 1fr; align-items: stretch; }
 .flow .stage { display: grid; gap: 0; align-content: start; }
 .flow .lane { font: 500 12px/1.4 var(--font-data); color: var(--fg-3); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 8px; }
@@ -108,7 +112,6 @@ ul.caveats { margin: 0; padding-left: 20px; display: grid; gap: 8px; max-width: 
 .meta { font: 12px/1.4 var(--font-data); color: var(--fg-3); margin: 2px 0 4px; }
 .runbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .runbar select { font: 500 13px/1.2 var(--font-data); color: var(--fg); background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 7px 10px; max-width: 100%; }
-.strips { display: grid; gap: 4px; }
 .tip { position: absolute; pointer-events: none; background: var(--fg); color: var(--bg); font: 12px/1.45 var(--font-data); padding: 7px 9px; border-radius: 5px; white-space: nowrap; z-index: 5; transform: translate(-50%, calc(-100% - 10px)); }
 footer { font-size: 13px; color: var(--fg-3); border-top: 1px solid var(--rule); padding-top: 14px; display: grid; gap: 4px; }
 a { color: var(--ai); }
@@ -126,13 +129,6 @@ a { color: var(--ai); }
     <p class="lede" id="lede"></p>
     <div class="tbl-wrap"><table class="summary" id="summary"></table></div>
   </header>
-
-  <section id="across-section">
-    <div class="figlabel">ACROSS RUNS</div>
-    <h2>Every run so far</h2>
-    <p class="caption">One dot per run; the selected run is ringed. Green lines are the paper's values. Click a dot to switch runs.</p>
-    <div class="strips" id="across"></div>
-  </section>
 
   <section>
     <div class="figlabel">HOW IT WORKS</div>
@@ -365,7 +361,6 @@ function selectRun(id) {
     render(D, A, N || {}, run);
     for (const sec of ["example", "split", "wave-cells", "spectrum", "validation", "ablation"]) document.getElementById(sec).closest("section").hidden = !A;
     if (A) renderPaper(A);
-    drawAcross(id);
   }).catch(failed);
 }
 
@@ -376,25 +371,41 @@ function render(D, A, N, run) {
   document.getElementById("lede").innerHTML = `The paper's search, EDGAR, run unchanged on the paper's mouse V1 recording, with the free <code>${D.run.model}</code> writing the equations instead of Gemini.`;
   const wk = A ? winnerKey(A) : null;
   const P = A ? A.models[PAPER_NAME] : null, WM = A ? A.models[wk] : null, DGM = A ? A.models["Double Gaussian"] : null;
-  const vsDG = m => m.split_errors ? `${(100 * (m.split_errors.all.held_out / DGM.split_errors.all.held_out - 1)).toFixed(2)}%` : `${(100 * (m.mse / DGM.mse - 1)).toFixed(2)}%`;
   const sub = t => `<span class="sub">${t}</span>`;
-  const na = "not measured";
+  const na = "not measured", dash = `<span class="muted">–</span>`;
+  const heldVsDG = m => 100 * (m.split_errors.all.held_out / DGM.split_errors.all.held_out - 1);
+  const gap = m => m.split_errors.all.held_out - m.split_errors.all.fit;
+  const pct = v => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(2) + "%";
+  const recAlpha = A ? A.data.eligible.log.alpha : null;
   const rows = [
-    ["The search"],
-    ["Code-writing model", "Gemini 2.0 Flash, 2.5 Flash every third generation", D.run.model],
-    ["Programs proposed", "576", `${D.run.proposals}${sub(`${D.run.scored} scored, ${D.generations.length} generations`)}`],
-    ["Wall time · LLM cost", "about 45 min · $8.25", `${D.run.hours.toFixed(2)} h · ${D.run.cost ?? "$0.00"}`],
-    ["Fitted exponent p first appeared", "after several generations", `generation ${D.first_exponent_gen ?? "–"}${sub(`${D.exp_programs} of ${D.run.scored} programs fit one`)}`],
-    [`Fit to single neurons${A ? ` · ${A.cells.toLocaleString()} reliable cells, refit here` : ""}`],
-    ["Parameters per cell", "11", `${W.params}${sub("one is never used")}`],
-    ["Held-out error vs double Gaussian", A ? `${vsDG(P)}${sub("paper's equation")}` : na, A ? `${vsDG(WM)}${sub("winner")}` : na],
-    ["Median held-out R²", A ? `${f3(P.r2.median)}${sub(`double Gaussian ${f3(DGM.r2.median)}`)}` : na, A ? f3(WM.r2.median) : na],
-    ["Peakiness, median min(p₁, p₂)", `1.20${A && P.peakiness ? sub(`${f2(P.peakiness.median_min_p)} refit here`) : ""}`, `${f2(D.pmin.median)}${sub(`${Math.round(D.pmin.at_floor * 100)}% at its floor of 1`)}`],
-    ["Population geometry · eigenspectrum decay α (higher = faster decay)"],
-    ["Recording", "4.26", A ? `${f2(A.data.eligible.log.alpha)} log fit · ${f2(A.data.eligible.linear.alpha)} linear fit${sub("same data, measured here")}` : na],
-    ["Fitted curves", `4.34${A ? sub(`paper's equation; ${f2(P.pca.log.alpha)} refit here`) : ""}`, A ? `${f2(WM.pca.log.alpha)}${sub("winner")}` : na],
-  ];
-  document.getElementById("summary").innerHTML = `<thead><tr><th></th><th>Tilbury et al. (2025)</th><th>This run</th></tr></thead><tbody>${rows.map(r => r.length === 1 ? `<tr class="group"><td colspan="3">${r[0]}</td></tr>` : `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("")}</tbody>`;
+    { group: "The search" },
+    { label: "Code-writing model", dg: "none, written by hand", paper: "Gemini 2.0 Flash, 2.5 Flash every third generation", run: D.run.model },
+    { label: "Candidates proposed", dg: dash, paper: "576", run: `${D.run.proposals}${sub(`${D.run.scored} ran, ${D.generations.length} generations`)}` },
+    { label: "Wall time · LLM cost", hint: "lower is better", dg: dash, paper: "about 45 min · $8.25", run: `${D.run.hours.toFixed(2)} h · ${D.run.cost ?? "$0.00"}` },
+    { label: "Fitted exponent p first appeared", hint: "later means it was found rather than recalled", dg: dash, paper: "after several generations", run: `generation ${D.first_exponent_gen ?? "–"}${sub(`${D.exp_programs} of ${D.run.scored} candidates fit one`)}` },
+    { group: `Fit to single neurons${A ? ` · all three refitted here to the same ${A.cells.toLocaleString()} neurons` : ""}` },
+    { label: "Parameters per neuron", hint: "fewer is simpler", dg: String(A ? DGM.parameters : 5), paper: "11", run: `${W.params}${sub("one is never used")}` },
+    A ? { label: "Held-out error vs double Gaussian", hint: "lower is better", dg: "0% (reference)", paper: pct(heldVsDG(P)), run: pct(heldVsDG(WM)), score: [0, heldVsDG(P), heldVsDG(WM)], low: true }
+      : { label: "Held-out error vs double Gaussian", hint: "lower is better", dg: na, paper: na, run: na },
+    A ? { label: "Median held-out R²", hint: "higher is better; 1 would be a perfect fit", dg: f3(DGM.r2.median), paper: f3(P.r2.median), run: f3(WM.r2.median), score: [DGM.r2.median, P.r2.median, WM.r2.median] }
+      : { label: "Median held-out R²", dg: na, paper: na, run: na },
+    A ? { label: "Fit-to-held-out error gap", hint: "how much each fit chases noise; small is not automatically better, a rigid model also has a small gap", dg: f3(gap(DGM)), paper: f3(gap(P)), run: f3(gap(WM)) } : null,
+    { label: "Peakiness, median min(p₁, p₂)", hint: "not better or worse: 2 is a Gaussian peak, lower is sharper; the paper found 1.20", dg: "2 (fixed)", paper: `1.20${A && P.peakiness ? sub(`${f2(P.peakiness.median_min_p)} refitted here`) : ""}`, run: `${f2(D.pmin.median)}${sub(`${Math.round(D.pmin.at_floor * 100)}% sit at its floor of 1`)}` },
+    { group: "Population geometry" },
+    { label: "Eigenspectrum decay α of the recording", hint: "the target each model's curves should match", span: A ? `4.26 in the paper · ${f2(recAlpha)} measured here (log fit; ${f2(A.data.eligible.linear.alpha)} with a linear fit)` : "4.26 in the paper" },
+    A ? { label: "Eigenspectrum decay α of the fitted curves", hint: `closer to the recording's ${f2(recAlpha)} is better`, dg: f2(DGM.pca.log.alpha), paper: `${f2(P.pca.log.alpha)}${sub("4.34 in the paper")}`, run: f2(WM.pca.log.alpha), score: [DGM.pca.log.alpha, P.pca.log.alpha, WM.pca.log.alpha].map(v => -Math.abs(v - recAlpha)) }
+      : { label: "Eigenspectrum decay α of the fitted curves", dg: na, paper: "4.34", run: na },
+  ].filter(Boolean);
+  const cols = ["dg", "paper", "run"];
+  const cell = (r, c, i) => {
+    let best = r.best === c;
+    if (r.score) { const vals = r.score.map(v => (r.low ? -v : v)); best = vals[i] === Math.max(...vals); }
+    const v = String(r[c]), at = v.indexOf('<span class="sub">'), tag = best ? ' <span class="tag">best</span>' : "";
+    return `<td class="${best ? "best" : ""}">${at < 0 ? v + tag : v.slice(0, at) + tag + v.slice(at)}</td>`;
+  };
+  document.getElementById("summary").innerHTML = `<thead><tr><th></th><th>Double Gaussian<span class="sub">the paper's baseline</span></th><th>Paper's equation<span class="sub">Tilbury et al. (2025)</span></th><th>This run's winner<span class="sub">program ${wid}</span></th></tr></thead><tbody>${rows.map(r =>
+    r.group ? `<tr class="group"><td colspan="4">${r.group}</td></tr>`
+    : `<tr><td>${r.label}${r.hint ? `<span class="hint">${r.hint}</span>` : ""}</td>${r.span ? `<td colspan="3">${r.span}</td>` : cols.map((c, i) => cell(r, c, i)).join("")}</tr>`).join("")}</tbody>`;
   drawFlow(D, A);
 
   document.getElementById("locked-cap").textContent = `The top ${D.candidates.length - 2} programs by discovery loss competed on ${counts.selection ?? "the"} selection cells; only the winner and the two seeds were then scored once on ${counts.locked_test ?? "the"} locked test cells.`;
@@ -418,15 +429,6 @@ function render(D, A, N, run) {
   const cands = D.candidates.map(c => `<tr><td>${c.id.startsWith("seed") ? (c.id === "seed_1" ? "single Gaussian" : "double Gaussian") : c.id}${c.id === wid ? " <span class='sub'>winner</span>" : ""}</td><td class="n">${c.g < 0 ? "seed" : c.g}</td><td class="n">${c.params ?? "–"}</td><td class="n">${c.disc ? f3(c.disc) : "–"}</td><td class="n">${c.sel ? f3(c.sel) : "failed"}</td></tr>`).join("");
   document.getElementById("candidates").innerHTML = `<thead><tr><th>Program</th><th class="n">Generation</th><th class="n">Params</th><th class="n">Discovery</th><th class="n">Selection</th></tr></thead><tbody>${cands}</tbody>`;
 }
-
-const ACROSS = [
-  ["gain", "locked-test gain over double Gaussian", v => f2(v), null],
-  ["pmin", "median min(p₁, p₂)", v => f2(v), 1.2],
-  ["alpha_data", "recording α (rcvPCA, log fit)", v => f2(v), 4.26],
-  ["alpha_winner", "winner α (PCA, log fit)", v => f2(v), 4.34],
-  ["wave_gain", "R² gain from the wave (median)", v => v.toFixed(4), null],
-  ["hours", "wall hours", v => v.toFixed(2), 0.75],
-];
 
 function drawFlow(D, A) {
   const c = D.cell_counts || {}, n = v => (v ?? 0).toLocaleString();
@@ -457,35 +459,6 @@ function drawFlow(D, A) {
       node("This page: refit and compare", `The winner, the paper's equation and the double Gaussian, refitted to all ${n(total)} neurons. Figures A and B, and the eigenspectra.`, "out"),
     ])}
   </div>`;
-}
-
-function drawAcross(selected) {
-  const host = document.getElementById("across"); host.innerHTML = "";
-  const w = 1000, rowH = 44, m = { l: 290, r: 70, t: 8, b: 8 };
-  const rows = ACROSS.filter(([k]) => RUNS.some(r => r.summary[k] != null));
-  const s = svg(host, w, m.t + m.b + rowH * rows.length);
-  rows.forEach(([key, label, fmt, ref], i) => {
-    const vals = RUNS.map(r => r.summary[key]).filter(v => v != null);
-    const all = ref == null ? vals : vals.concat(ref);
-    let lo = Math.min(...all), hi = Math.max(...all);
-    const pad = (hi - lo || Math.abs(hi) || 1) * 0.25; lo -= pad; hi += pad;
-    const X = scale(lo, hi, m.l, w - m.r), y = m.t + i * rowH + rowH / 2;
-    txt(s, m.l - 14, y + 4, label, { "text-anchor": "end", class: "lbl" });
-    el("line", { x1: m.l, x2: w - m.r, y1: y, y2: y, stroke: "var(--grid)" }, s);
-    txt(s, m.l, y + 18, fmt(lo), { style: "font-size:10px" });
-    txt(s, w - m.r, y + 18, fmt(hi), { "text-anchor": "end", style: "font-size:10px" });
-    if (ref != null) { el("line", { x1: X(ref), x2: X(ref), y1: y - 12, y2: y + 12, stroke: "var(--paper)", "stroke-width": 2 }, s); txt(s, X(ref), y - 15, `paper ${fmt(ref)}`, { "text-anchor": "middle", style: "font-size:10px" }); }
-    for (const r of RUNS) {
-      const v = r.summary[key]; if (v == null) continue;
-      const on = r.id === selected;
-      const dot = el("circle", { cx: X(v), cy: y, r: on ? 7 : 5, fill: "var(--ai)", stroke: on ? "var(--fg)" : "var(--bg)", "stroke-width": 2, style: "cursor:pointer" }, s);
-      if (on) txt(s, X(v), y + 20, fmt(v), { "text-anchor": "middle", class: "lbl-strong" });
-      const t = el("circle", { cx: X(v), cy: y, r: 12, fill: "transparent", style: "cursor:pointer" }, s);
-      t.addEventListener("pointerenter", () => showTip(host, X(v), y - 8, `${r.label}<br>${label}: ${fmt(v)}`));
-      t.addEventListener("pointerleave", hideTip);
-      t.addEventListener("click", () => selectRun(r.id));
-    }
-  });
 }
 
 function drawSearch(D) {
