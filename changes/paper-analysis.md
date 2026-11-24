@@ -15,3 +15,4 @@ Added the population analyses from Tilbury et al. (2025):
 - `fitted_exponents` handles a peak with a separate exponent on each side (counting its sharper side), as in the 24-generation winner.
 - 24-generation hy4-flash-free run (20261124-005016-b0f216) added to the results page and leakage audit; twice the generations gave a winner that ties the 12-generation one.
 - The results page lists every run in a table under the title (model, generations, winner, locked-test score, cost); clicking a row shows that run. It opens on the first, 12-generation run.
+- The results page now shows every run on one page: each run's full report is stacked under the comparison table, in place of the run picker. The page declares UTF-8.
