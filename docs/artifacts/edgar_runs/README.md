@@ -1,6 +1,6 @@
 # EDGAR runs page
 
-`index.html` shows one run at a time with a picker; the newest run opens first. Serve the folder over HTTP (for example `uv run python -m http.server -d docs/artifacts/edgar_runs`); the page loads `runs.json` and then each run's files.
+`index.html` lists every run in a table under the title and shows one at a time; click a row (or use the picker) to switch. The first run in `runs.json` opens by default. Serve the folder over HTTP (for example `uv run python -m http.server -d docs/artifacts/edgar_runs`); the page loads `runs.json` and then each run's files.
 
 To add a finished, rescored run:
 
