@@ -141,3 +141,17 @@ def test_seed_estimator_finds_the_preferred_direction():
     assert abs(start["pref_1"] - 2.0) < 0.2
     assert abs(start["level_1"] - 0.5) < 0.2
     assert abs(start["scale_1"] - 3.0) < 0.3
+
+
+def test_from_pysr_reads_a_template_equation_and_marks_phase_parameters():
+    text = "f = exp((cos(#4 + #1) + #2) - 0.22668725) - -0.5; q1 = [1.0, 2.0]; q3 = [0.1, 0.2]"
+
+    tree = symbolic.from_pysr(text)
+
+    kinds = dict(symbolic.parameters(tree))
+    assert sorted(kinds.values()) == ["free", "pref"]
+    model_np, _ = compile_pair(tree)
+    names = [name for name, _ in symbolic.parameters(tree)]
+    values = {"pref_1": 1.3, "free_1": 0.4}
+    expected = np.exp(np.cos(1.3 + GRID) + 0.4 - 0.22668725) + 0.5
+    assert np.allclose(model_np(GRID, *[values[n] for n in names]), expected)

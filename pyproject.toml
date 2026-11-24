@@ -39,6 +39,9 @@ dev = [
     "ruff==0.16.5",
     "ty==0.0.78",
 ]
+sr = [
+    "pysr==2.7.3",
+]
 
 [tool.uv.sources]
 wills-agentic-tools = { git = "https://github.com/wd7512/wills-agentic-tools", tag = "v0.2.1" }

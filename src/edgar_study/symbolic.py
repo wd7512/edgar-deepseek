@@ -430,3 +430,24 @@ def parse(text):
     if pos != len(tokens):
         raise ValueError(f"unexpected trailing input in {text!r}")
     return canonical(tree)
+
+
+def _phases(tree):
+    """Names of parameters added to or subtracted from theta directly, which act as preferred angles."""
+    found = set()
+    for _, node in nodes(tree):
+        if node[0] in ("add", "sub") and THETA in node[1:]:
+            found |= {c[1] for c in node[1:] if c[0] == "param"}
+    return found
+
+
+def from_pysr(text):
+    """A tree from a PySR template equation `f = ...; q1 = [...]`, where #1 is theta and #k+1 is the
+    k-th per-neuron parameter. Global constants stay fixed. Parameters added to theta become `pref`
+    parameters, so the generic estimator starts them at the preferred angle; the rest are `free`."""
+    body = text.split(";")[0].split("=", 1)[1]
+    body = re.sub(r"#(\d+)", lambda m: "theta" if m.group(1) == "1" else f"q{int(m.group(1)) - 1}", body)
+    tree = parse(body)
+    for name in _phases(tree):
+        tree = _retag(tree, name, "pref")
+    return canonical(tree)
