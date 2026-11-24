@@ -1,2 +1,3 @@
 Added a no-LLM null baseline for the equation search:
 - `edgar_study.symbolic`: expression trees over the stimulus angle whose parameter leaves are fitted per neuron, turned into the same NumPy program, JAX program and parameter estimator an LLM writes. It has random trees, mutation, crossover, the two upstream seeds as trees, and a parser for PySR-style formulas.
+- `edgar null-search --seed N`: runs upstream's unchanged search loop (seeds, islands, selection, migration, `lm-bounded` fitting, final databases) with GP proposals in place of the three LLM stages, and writes the same run folder an LLM run does, so `edgar rescore`, `edgar report` and the paper analysis read it.

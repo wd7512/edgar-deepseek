@@ -205,6 +205,20 @@ def main():
     )
     run.set_defaults(func=lambda args: _load("engine", "run")(args))
 
+    null = commands.add_parser(
+        "null-search",
+        parents=[dataset, upstream, fitter],
+        help="Run the upstream search with genetic programming in place of the LLM (null baseline).",
+    )
+    null.add_argument("--seed", type=int, default=0)
+    null.add_argument("--iterations", type=int, default=12)
+    null.add_argument("--time-limit", type=float, default=105, help="Minutes.")
+    null.add_argument("--islands", type=int, default=8)
+    null.add_argument("--batch-size", type=int, default=6, help="Proposals per island per generation.")
+    null.add_argument("--cell-fraction", type=float, default=1.0)
+    null.add_argument("--results", type=Path, default=Path("results"))
+    null.set_defaults(func=lambda args: _load("null_search", "run")(args))
+
     rescore = commands.add_parser(
         "rescore",
         parents=[dataset, upstream, fitter],
