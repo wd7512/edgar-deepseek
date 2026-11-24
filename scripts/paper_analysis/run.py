@@ -21,6 +21,7 @@ import numpy as np
 
 from edgar_study import fitting, geometry, paper_models
 from edgar_study.datasets import load_dataset, prepare
+from edgar_study.exponents import fitted_exponents
 from edgar_study.split_errors import split_errors
 from edgar_study.upstream import import_upstream, score_program, searched_programs
 
@@ -45,7 +46,7 @@ def winner(run_dir, utils):
     )
     estimator_code = frame.loc[ids == best["id"], "parameter_estimator_code_string"].iloc[0]
     model = utils.str_to_func(best["jax_code"], "neuron_model")
-    return best["id"], model, utils.str_to_func(estimator_code, "parameter_estimator")
+    return best["id"], model, utils.str_to_func(estimator_code, "parameter_estimator"), best["jax_code"]
 
 
 def predict(model, params, theta):
@@ -71,7 +72,14 @@ def spectrum_summary(spectrum):
     return summary
 
 
-def fit_population(upstream, model, estimator, x, y, centres, residuals):
+def source(model):
+    try:
+        return inspect.getsource(model)
+    except (OSError, TypeError):
+        return ""
+
+
+def fit_population(upstream, model, estimator, x, y, centres, residuals, code=""):
     """Fit every cell, then return the fitted parameters, curves and their spectra (Fig. 3f and S1)."""
     score, mse, count, params = score_program(upstream, model, estimator, x, y, MAX_ITER)
     params = np.asarray(params)
@@ -87,9 +95,9 @@ def fit_population(upstream, model, estimator, x, y, centres, residuals):
         "rcvpca_with_paper_noise": spectrum_summary(geometry.rcvpca(curves[:, :, None] + residuals)),
     }
     names = [n for n in inspect.signature(model).parameters if n != "theta"]
-    for first, second in (("exponent_1", "exponent_2"), ("shape_power_1", "shape_power_2")):
-        if first in names:
-            entry["peakiness"] = peakiness(names, params, first, second)
+    exponents = fitted_exponents(names, params, code or source(model))
+    if exponents is not None:
+        entry["peakiness"] = peakiness(*exponents)
     return entry, params, curves
 
 
@@ -106,8 +114,7 @@ def describe(name, entry, seconds):
     )
 
 
-def peakiness(names, params, first, second):
-    p1, p2 = params[:, names.index(first)], params[:, names.index(second)]
+def peakiness(p1, p2):
     lowest = np.minimum(p1, p2)
     return {
         "median_min_p": float(np.median(lowest)),
@@ -284,7 +291,8 @@ def main():
     fit_trials = indices["fit_trial_columns"]
     split_groups = {**groups, "all": np.arange(len(cells))}
 
-    winner_id, winner_model, winner_estimator = winner(args.run.resolve(), utils)
+    winner_id, winner_model, winner_estimator, winner_code = winner(args.run.resolve(), utils)
+    codes = {f"EDGAR winner {winner_id}": winner_code}
     models = {
         "Double Gaussian": (seeds.neuron_model_2_jax, seeds.parameter_estimator_2),
         **paper_models.LADDER,
@@ -311,7 +319,9 @@ def main():
     results, fitted = {}, {}
     for name, (model, estimator) in models.items():
         fit_started = time.time()
-        entry, params, curves = fit_population(upstream, model, estimator, x, y, centres, residuals)
+        entry, params, curves = fit_population(
+            upstream, model, estimator, x, y, centres, residuals, codes.get(name, "")
+        )
         observed = np.asarray(y[:, held_out])
         residual = observed - predict(model, params, x[:, held_out])
         total = np.sum((observed - observed.mean(axis=1, keepdims=True)) ** 2, axis=1)
@@ -348,7 +358,9 @@ def main():
     for name in ("Double Gaussian", "AI model", f"EDGAR winner {winner_id}"):
         fit_started = time.time()
         model, estimator = models[name]
-        entry, _, _ = fit_population(upstream, model, estimator, x_every, y_every, centres, residuals_every)
+        entry, _, _ = fit_population(
+            upstream, model, estimator, x_every, y_every, centres, residuals_every, codes.get(name, "")
+        )
         all_cells[name] = entry
         describe(f"{name} (all cells)", entry, time.time() - fit_started)
 

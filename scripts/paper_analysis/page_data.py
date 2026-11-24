@@ -14,6 +14,7 @@ import numpy as np
 
 from edgar_study import fitting
 from edgar_study.datasets import load_dataset, prepare
+from edgar_study.exponents import clip_bounds, exponent_pair, fitted_exponents
 from edgar_study.upstream import combined_file, import_upstream, score_program, searched_programs
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -53,9 +54,15 @@ ds, _, _, dp = score_program(
 )
 wp, dp = np.asarray(wp), np.asarray(dp)
 names = [n for n in inspect.signature(wm).parameters if n != "theta"]
-p1, p2 = wp[:, names.index("shape_power_1")], wp[:, names.index("shape_power_2")]
+exponents = fitted_exponents(names, wp, w["jax_code"])
+if exponents is None:
+    raise SystemExit(
+        f"Winner {w['id']} has no pair of peak exponents; the page's peakiness figure needs one."
+    )
+pc1, pc2 = exponents
+low, high = clip_bounds(w["jax_code"], exponent_pair(names)[0])
+low, high = (low, high) if np.isfinite(low) and np.isfinite(high) else (0.0, 4.0)
 a2 = wp[:, names.index("amplitude_2")]
-pc1, pc2 = np.clip(p1, 1.0, 3.2), np.clip(p2, 1.0, 3.2)
 pmin = np.minimum(pc1, pc2)
 
 grid = np.linspace(0, 2 * np.pi, 181)
@@ -95,12 +102,13 @@ for k in pick:
         }
     )
 
-hist, edges = np.histogram(pmin, bins=np.arange(1.0, 3.25, 0.1))
+bins = np.arange(low, high + 0.05, 0.1)
+hist, edges = np.histogram(pmin, bins=bins)
 gens = rep["per_generation"]
 first_p = rep["first_generation_with_fitted_exponent"]
 a1 = wp[:, names.index("amplitude_1")]
 pdom = np.where(a1 >= a2, pc1, pc2)
-hist_dom, _ = np.histogram(pdom, bins=np.arange(1.0, 3.25, 0.1))
+hist_dom, _ = np.histogram(pdom, bins=bins)
 data = {
     "run": {
         "id": man["run_id"],
@@ -108,7 +116,10 @@ data = {
         "proposals": rep["proposals_attempted"],
         "scored": rep["programs_scored"],
         "sha": man["repo_sha"][:7],
-        "model": "hy4-flash-free",
+        "model": man["models"]["proposer"],
+        "stopped_early": man.get("recovered"),
+        "iterations": man["iterations"],
+        "list_cost_usd": rep.get("list_cost_usd", 0.0),
         "timings": man["timings"],
     },
     "seeds": rep["seed_losses"],
@@ -143,7 +154,9 @@ data = {
         "q1": float(np.percentile(pmin, 25)),
         "q3": float(np.percentile(pmin, 75)),
         "below2": float(np.mean(pmin < 2)),
-        "at_floor": float(np.mean(pmin <= 1.001)),
+        "at_floor": float(np.mean(pmin <= low + 0.001)),
+        "floor": low,
+        "ceiling": high,
         "hist": hist.tolist(),
         "edges": [round(e, 2) for e in edges.tolist()],
         "second_lobe_share": float(np.mean(a2 > 0.1)),
