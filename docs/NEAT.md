@@ -22,41 +22,48 @@ double Gaussian or the paper's form without an LLM's prior?
 ```bash
 JAX_PLATFORMS=cpu uv run edgar neat \
   --dataset data/gratings_drifting_GT1_2019_04_12_1.npy \
-  --population 96 --generations 6 --cell-fraction 0.25
+  --population 96 --generations 20 --cell-fraction 0.25
 ```
 
 The run directory holds `manifest.json`, `programs.jsonl`, `search.json`, `rescore.json` and the
-winner's source.
+winner's source. The 6-generation proof of concept is the same command with `--generations 6`.
 
 ## Results
 
-Proof of concept on the 25% discovery subset (264 cells), 96 genomes × 6 generations, CPU,
+Proof of concept on the 25% discovery subset (264 cells), 96 genomes per generation, CPU,
 `lm-bounded`. Every genome starts from the smallest possible network: the three inputs connect
 directly to one output, with no hidden neurons. NEAT adds nodes and connections from there.
 
 | Run | Best discovery | Winner selection | Winner locked | Δ locked vs double Gaussian |
 | --- | ---: | ---: | ---: | ---: |
-| NEAT from nothing | 30.12 | 29.38 | 29.04 | −0.47 |
+| NEAT, 6 generations | 30.12 | 29.38 | 29.04 | −0.47 |
+| NEAT, 20 generations | 29.57 | 28.77 | 28.40 | +0.18 |
 | Double Gaussian seed | — | 28.85 | 28.57 | 0 |
 
-Best discovery score and hidden-neuron count per generation:
+Best discovery score per generation, 20-generation run:
 
-| Generation | 0 | 1 | 2 | 3 | 4 | 5 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Best score | 34.17 | 31.61 | 31.50 | 30.31 | 30.24 | 30.12 |
-| Gain | — | −2.56 | −0.12 | −1.19 | −0.06 | −0.12 |
-| Genomes with 0 / 1 / 2 / 3 hidden | 96 / 0 / 0 / 0 | 57 / 39 / 0 / 0 | 31 / 48 / 17 / 0 | 5 / 58 / 33 / 0 | 2 / 55 / 33 / 6 | 6 / 61 / 28 / 1 |
+| Generation | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Best | 34.17 | 31.61 | 30.42 | 30.42 | 29.94 | 29.67 | 29.67 | 29.67 | 29.67 | 29.67 |
 
-The score improved every generation but the last two gained only 0.18 in total, so the search was
-converging rather than opening a new structural direction. The winner has **one hidden neuron**
-(`sin`, 7 fitted parameters, 5 connections), and the ten best genomes are all 30.12–30.32, nine of
-them with one hidden neuron. NEAT found a harmonic model, not the paper's asymmetric bump:
+| Generation | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Best | 29.67 | 29.67 | 29.64 | 29.59 | 29.59 | 29.59 | 29.59 | 29.57 | 29.57 | 29.57 |
 
-`softplus(b + w·1 + w·sin θ + w·sin(b′ + w·cos θ + w·sin θ))`
+The 6-generation run converged prematurely: its winner had one hidden neuron and the ten best
+genomes were within 0.2 of each other. The longer run kept mutating and found a better structure at
+generation 17. Its winner has **two hidden neurons**, 5 connections and 8 fitted parameters:
 
-It beats the score it started from but not the 5-parameter double Gaussian. With 576 evaluations
-the search spent most of its budget discovering that one hidden unit helps; it did not reach the
-paper's shape.
+`softplus(b + w·softplus(b′ + w·cos θ + w·cos(b″ + w·cos θ + w·sin θ)))`
+
+The constant input is unused; both hidden nodes are trigonometric, the first `cos` and the second
+`softplus`. This is a composition of a harmonic and a rectified unit, still not the paper's pair of
+Gaussians, but it fits the cells slightly better than the double Gaussian on held-out data.
+
+NEAT kept adding neurons without improving the best score. By generation 19 most genomes had 3–5
+hidden nodes, up from 0 at the start, while the best genome stayed at 2. The plateau from
+generation 6 to 11 and the final gain at generation 17 suggest the search is limited by mutation
+step size, not by the model class; extra neurons mostly added parameters and noise.
 
 ## Caveats
 
@@ -64,4 +71,5 @@ paper's shape.
   the score requires. This is not a network trained end to end by neuroevolution.
 - A network is not an equation. A better locked-cell score would show that the model class can fit
   the cells, not that it recovers the paper's mechanism.
-- One seed, one host. Repeat before drawing conclusions about the search itself.
+- One seed, one host. The 0.18 locked-cell margin over the double Gaussian has not been checked
+  across seeds, and the search needed 20 generations to find it.
