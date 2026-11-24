@@ -140,8 +140,8 @@ a { color: var(--ai); }
   <header id="top">
     <div class="eyebrow" id="run-count"></div>
     <h1>Reproduction of “AI-discovered tuning laws explain neuronal population code geometry” with cheaper models</h1>
-    <p class="lede" id="page-lede">The paper's search, EDGAR, run unchanged on the paper's mouse V1 recording, with cheaper models writing the equations instead of Gemini. Every run is on this page: the table compares them, and each run's full report follows in the same order.</p>
-    <div class="tbl-wrap"><table class="summary runs" id="runs-table" aria-label="Every run; choose one to jump to its report"></table></div>
+    <p class="lede" id="page-lede">The paper's search, EDGAR, run unchanged on the paper's mouse V1 recording, with cheaper models writing the equations instead of Gemini. The table puts every run's winner beside the paper's two models; each run's figures follow below it, in the same order.</p>
+    <div class="tbl-wrap"><table class="summary runs" id="runs-table" aria-label="Every statistic for the double Gaussian, the paper's equation and each run's winner"></table></div>
   </header>
 
   <div id="reports" style="display:grid;gap:72px"></div>
@@ -156,8 +156,6 @@ a { color: var(--ai); }
   <div class="report-head">
     <div class="eyebrow" id="run-eyebrow"></div>
     <h2 id="run-title"></h2>
-    <p class="lede" id="lede"></p>
-    <div class="tbl-wrap"><table class="summary" id="summary"></table></div>
   </div>
 
 
@@ -358,7 +356,7 @@ fetch("runs.json").then(r => r.json()).then(async index => {
   RUNS = index.runs;
   document.getElementById("run-count").textContent = `${RUNS.length} run${RUNS.length === 1 ? "" : "s"}`;
   const loaded = await Promise.all(RUNS.map(load));
-  drawRunsTable(loaded);
+  drawMainTable(loaded);
   const host = document.getElementById("reports"), tpl = document.getElementById("report-tpl");
   loaded.forEach(([D, A, N], i) => {
     const run = RUNS[i];
@@ -367,7 +365,7 @@ fetch("runs.json").then(r => r.json()).then(async index => {
     host.appendChild(root);
     within(root, () => {
       $("run-eyebrow").textContent = `Run ${i + 1} of ${RUNS.length} · ${run.id}`;
-      if (!D) { $("lede").textContent = "This run's data did not load. Reload the page to try again."; return; }
+      if (!D) { $("run-title").textContent = "This run's data did not load. Reload the page to try again."; return; }
       $("run-title").textContent = runTitle(D);
       render(D, A, N || {}, run);
       for (const sec of ["example", "split", "wave-cells", "spectrum", "validation", "ablation"]) $(sec).closest("section").hidden = !A;
@@ -383,23 +381,64 @@ function runTitle(D) {
   return `${D.run.model}, ${stop ? `${stop.generations_completed} of ${gens}` : gens} generations`;
 }
 
-function drawRunsTable(all) {
+function drawMainTable(all) {
   const host = document.getElementById("runs-table");
   const sub = t => `<span class="sub">${t}</span>`;
-  const DG0 = all.find(([D]) => D)?.[0]?.locked.double_gaussian;
-  const rows = all.map(([D, , N], i) => {
-    const run = RUNS[i], link = t => `<a href="#${slug(run.id)}">${t}</a>`;
-    if (!D) return `<tr><td>${link(run.label)}</td><td colspan="6" class="muted">data missing</td></tr>`;
-    const W = D.locked.winner, DG = D.locked.double_gaussian, stop = D.run.stopped_early;
-    const params = W.params - ((N && N.unused_parameters) || []).length;
-    const gens = stop ? `${stop.generations_completed} of ${D.run.iterations}${sub("stopped at the spend cap")}` : `${D.run.iterations ?? 12}`;
-    const cost = D.run.list_cost_usd ? `$${D.run.list_cost_usd.toFixed(2)}${sub("list price")}` : "free";
-    return `<tr><td>${link(`Run ${i + 1} · ${D.run.model}`)}${sub(run.id)}</td><td>${gens}</td><td>${D.winner_id}${sub(`${params} parameters`)}</td>` +
-      `<td>${W.score.toFixed(3)}</td><td>${(100 * (W.score - DG.score) / DG.score).toFixed(2).replace("-", "−")}%</td><td>${D.run.hours.toFixed(1)} h</td><td>${cost}</td></tr>`;
+  const dash = `<span class="muted">–</span>`, na = `<span class="muted">not measured</span>`;
+  const pct = v => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(2) + "%";
+  const ok = all.filter(([D]) => D);
+  const base = all.find(([, A]) => A)?.[1];
+  const DGM = base?.models["Double Gaussian"], P = base?.models[PAPER_NAME];
+  const DGL = ok[0]?.[0].locked.double_gaussian;
+  const runs = all.map(([D, A, N], i) => {
+    if (!D) return null;
+    const unused = ((N && N.unused_parameters) || []).length;
+    return { D, A, W: D.locked.winner, M: A ? A.models[winnerKey(A)] : null, params: D.locked.winner.params - unused, i };
   });
-  host.innerHTML = `<thead><tr><th>Run<span class="sub">click to jump to its report</span></th><th>Generations</th><th>Winner</th>` +
-    `<th>Locked-test score<span class="sub">lower is better; double Gaussian ${DG0 ? DG0.score.toFixed(3) : "–"}</span></th>` +
-    `<th>Score vs double Gaussian<span class="sub">locked-test score, parameter penalty included</span></th><th>Wall time</th><th>LLM cost</th></tr></thead><tbody>${rows.join("")}</tbody>`;
+  const heldVsDG = m => 100 * (m.split_errors.all.held_out / DGM.split_errors.all.held_out - 1);
+  const gap = m => m.split_errors.all.held_out - m.split_errors.all.fit;
+  const recAlpha = base ? base.data.eligible.log.alpha : null;
+  const per = f => runs.map(r => (r ? f(r) : dash));
+  const perA = (f, score) => ({ vals: per(r => (r.M ? f(r.M, r) : na)), score: score && runs.map(r => (r && r.M ? score(r.M) : null)) });
+  const rows = [
+    { group: "The search" },
+    { label: "Code-writing model", dg: "none, written by hand", paper: "Gemini 2.0 Flash, 2.5 Flash every third generation", vals: per(r => r.D.run.model) },
+    { label: "Generations", dg: dash, paper: dash, vals: per(r => { const stop = r.D.run.stopped_early, n = r.D.run.iterations ?? 12; return stop ? `${stop.generations_completed} of ${n}${sub(`stopped at the $9.50 spend cap; winner picked from the ${stop.programs} programs scored by then`)}` : String(n); }) },
+    { label: "Candidates proposed", dg: dash, paper: "576", vals: per(r => `${r.D.run.proposals}${sub(`${r.D.run.scored} ran`)}`) },
+    { label: "Wall time · LLM cost", hint: "lower is better", dg: dash, paper: "about 45 min · $8.25", vals: per(r => `${r.D.run.hours.toFixed(1)} h · ${r.D.run.list_cost_usd ? `$${r.D.run.list_cost_usd.toFixed(2)}${sub("at list price")}` : "free"}`) },
+    { label: "Fitted exponent p first appeared", hint: "later means it was found rather than recalled", dg: dash, paper: "after several generations", vals: per(r => `generation ${r.D.first_exponent_gen ?? "–"}${sub(`${r.D.exp_programs} of ${r.D.run.scored} candidates fit one`)}`) },
+    { group: "Score on the locked-test neurons the search never saw" },
+    { label: "Locked-test score", hint: "10 × held-out error + 0.01 × parameters; lower is better", dg: DGL ? DGL.score.toFixed(3) : na, paper: dash, vals: per(r => r.W.score.toFixed(3)), score: [DGL?.score, null, ...runs.map(r => r?.W.score)], low: true },
+    { label: "Score vs double Gaussian", hint: "lower is better", dg: "0% (reference)", paper: dash, vals: per(r => pct(100 * (r.W.score / DGL.score - 1))) },
+    { group: `Fit to single neurons${base ? ` · all refitted here to the same ${base.cells.toLocaleString()} neurons` : ""}` },
+    { label: "Parameters per neuron", hint: "fewer is simpler", dg: String(DGM ? DGM.parameters : 5), paper: "11", vals: per(r => String(r.params)) },
+    { label: "Held-out error vs double Gaussian", hint: "lower is better", dg: "0% (reference)", paper: P ? pct(heldVsDG(P)) : na, ...perA(m => pct(heldVsDG(m)), heldVsDG), low: true, scoreBase: P ? [0, heldVsDG(P)] : null },
+    { label: "Median held-out R²", hint: "higher is better; 1 would be a perfect fit", dg: DGM ? f3(DGM.r2.median) : na, paper: P ? f3(P.r2.median) : na, ...perA(m => f3(m.r2.median), m => m.r2.median), scoreBase: DGM ? [DGM.r2.median, P.r2.median] : null },
+    { label: "Fit-to-held-out error gap", hint: "how much each fit chases noise; a rigid model also has a small gap", dg: DGM ? f3(gap(DGM)) : na, paper: P ? f3(gap(P)) : na, ...perA(m => f3(gap(m))) },
+    { label: "Peakiness, median min(p₁, p₂)", hint: "2 is a Gaussian peak, lower is sharper; the paper found 1.20", dg: "2 (fixed)", paper: `1.20${P && P.peakiness ? sub(`${f2(P.peakiness.median_min_p)} refitted here`) : ""}`,
+      vals: per(r => (r.M && r.M.peakiness ? `${f2(r.M.peakiness.median_min_p)}${sub(`${Math.round(r.D.pmin.at_floor * 100)}% of locked-test neurons at its floor of ${r.D.pmin.floor ?? 1}`)}` : na)) },
+    { group: "Population geometry" },
+    { label: "Eigenspectrum decay α of the recording", hint: "the target each model's curves should match", span: base ? `4.26 in the paper · ${f2(recAlpha)} measured here (log fit; ${f2(base.data.eligible.linear.alpha)} with a linear fit)` : "4.26 in the paper" },
+    { label: "Eigenspectrum decay α of the fitted curves", hint: `closer to the recording's ${recAlpha ? f2(recAlpha) : "value"} is better`, dg: DGM ? f2(DGM.pca.log.alpha) : na, paper: P ? `${f2(P.pca.log.alpha)}${sub("4.34 in the paper")}` : "4.34",
+      ...perA(m => f2(m.pca.log.alpha), m => -Math.abs(m.pca.log.alpha - recAlpha)), scoreBase: DGM ? [-Math.abs(DGM.pca.log.alpha - recAlpha), -Math.abs(P.pca.log.alpha - recAlpha)] : null },
+  ];
+  const ncol = 2 + all.length;
+  const cell = (v, best) => {
+    v = String(v);
+    const at = v.indexOf('<span class="sub">'), tag = best ? ' <span class="tag">best</span>' : "";
+    return `<td class="${best ? "best" : ""}">${at < 0 ? v + tag : v.slice(0, at) + tag + v.slice(at)}</td>`;
+  };
+  const body = rows.map(r => {
+    if (r.group) return `<tr class="group"><td colspan="${ncol + 1}">${r.group}</td></tr>`;
+    const label = `<td>${r.label}${r.hint ? `<span class="hint">${r.hint}</span>` : ""}</td>`;
+    if (r.span) return `<tr>${label}<td colspan="${ncol}">${r.span}</td></tr>`;
+    let scores = r.scoreBase && r.score ? [...r.scoreBase, ...r.score] : r.scoreBase ? null : r.score;
+    if (scores) scores = scores.map(v => (v == null ? null : r.low ? -v : v));
+    const top = scores ? Math.max(...scores.filter(v => v != null)) : null;
+    return `<tr>${label}${[r.dg, r.paper, ...r.vals].map((v, i) => cell(v, scores != null && scores[i] === top)).join("")}</tr>`;
+  }).join("");
+  const head = runs.map((r, i) => `<th><a href="#${slug(RUNS[i].id)}">Run ${i + 1} winner</a>${sub(r ? `program ${r.D.winner_id} · ${RUNS[i].id}` : RUNS[i].id)}</th>`).join("");
+  host.innerHTML = `<thead><tr><th></th><th>Double Gaussian<span class="sub">the paper's baseline</span></th><th>Paper's equation<span class="sub">Tilbury et al. (2025)</span></th>${head}</tr></thead><tbody>${body}</tbody>`;
 }
 
 function failed() {
@@ -415,50 +454,8 @@ function load(run) {
 }
 
 function render(D, A, N, run) {
-  const W = D.locked.winner, DG = D.locked.double_gaussian;
-  const gain = DG.score - W.score, wid = D.winner_id;
-  const counts = D.cell_counts || {};
   UNUSED = (N.unused_parameters || []).length;
-  const free = /free/.test(D.run.model), stop = D.run.stopped_early;
-  $("lede").innerHTML = `The paper's search, EDGAR, run unchanged on the paper's mouse V1 recording, with the ${free ? "free" : "paid"} <code>${D.run.model}</code> writing the equations instead of Gemini${stop ? "" : `, for ${D.run.iterations ?? 12} generations`}.` +
-    (stop ? ` It reached its $9.50 spend cap after ${stop.generations_completed} of ${D.run.iterations ?? 12} generations; the winner is picked from the ${stop.programs} programs it had scored by then.` : "");
-  const wk = A ? winnerKey(A) : null;
-  const P = A ? A.models[PAPER_NAME] : null, WM = A ? A.models[wk] : null, DGM = A ? A.models["Double Gaussian"] : null;
-  const sub = t => `<span class="sub">${t}</span>`;
-  const na = "not measured", dash = `<span class="muted">–</span>`;
-  const heldVsDG = m => 100 * (m.split_errors.all.held_out / DGM.split_errors.all.held_out - 1);
-  const gap = m => m.split_errors.all.held_out - m.split_errors.all.fit;
-  const pct = v => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(2) + "%";
-  const recAlpha = A ? A.data.eligible.log.alpha : null;
-  const rows = [
-    { group: "The search" },
-    { label: "Code-writing model", dg: "none, written by hand", paper: "Gemini 2.0 Flash, 2.5 Flash every third generation", run: D.run.model },
-    { label: "Candidates proposed", dg: dash, paper: "576", run: `${D.run.proposals}${sub(`${D.run.scored} ran, ${D.generations.length} generations`)}` },
-    { label: "Wall time · LLM cost", hint: "lower is better", dg: dash, paper: "about 45 min · $8.25", run: `${D.run.hours.toFixed(2)} h · $${(D.run.list_cost_usd ?? 0).toFixed(2)}${D.run.list_cost_usd ? sub("at list price") : ""}` },
-    { label: "Fitted exponent p first appeared", hint: "later means it was found rather than recalled", dg: dash, paper: "after several generations", run: `generation ${D.first_exponent_gen ?? "–"}${sub(`${D.exp_programs} of ${D.run.scored} candidates fit one`)}` },
-    { group: `Fit to single neurons${A ? ` · all three refitted here to the same ${A.cells.toLocaleString()} neurons` : ""}` },
-    { label: "Parameters per neuron", hint: "fewer is simpler", dg: String(A ? DGM.parameters : 5), paper: "11", run: String(W.params - UNUSED) },
-    A ? { label: "Held-out error vs double Gaussian", hint: "lower is better", dg: "0% (reference)", paper: pct(heldVsDG(P)), run: pct(heldVsDG(WM)), score: [0, heldVsDG(P), heldVsDG(WM)], low: true }
-      : { label: "Held-out error vs double Gaussian", hint: "lower is better", dg: na, paper: na, run: na },
-    A ? { label: "Median held-out R²", hint: "higher is better; 1 would be a perfect fit", dg: f3(DGM.r2.median), paper: f3(P.r2.median), run: f3(WM.r2.median), score: [DGM.r2.median, P.r2.median, WM.r2.median] }
-      : { label: "Median held-out R²", dg: na, paper: na, run: na },
-    A ? { label: "Fit-to-held-out error gap", hint: "how much each fit chases noise; small is not automatically better, a rigid model also has a small gap", dg: f3(gap(DGM)), paper: f3(gap(P)), run: f3(gap(WM)) } : null,
-    { label: "Peakiness, median min(p₁, p₂)", hint: "not better or worse: 2 is a Gaussian peak, lower is sharper; the paper found 1.20", dg: "2 (fixed)", paper: `1.20${A && P.peakiness ? sub(`${f2(P.peakiness.median_min_p)} refitted here`) : ""}`, run: wk && A.models[wk].peakiness ? `${f2(A.models[wk].peakiness.median_min_p)}${sub(`same ${A.cells.toLocaleString()} neurons; ${Math.round(D.pmin.at_floor * 100)}% of locked-test neurons at its floor of ${D.pmin.floor ?? 1}`)}` : `${f2(D.pmin.median)}${sub(`locked-test neurons; ${Math.round(D.pmin.at_floor * 100)}% at its floor of ${D.pmin.floor ?? 1}`)}` },
-    { group: "Population geometry" },
-    { label: "Eigenspectrum decay α of the recording", hint: "the target each model's curves should match", span: A ? `4.26 in the paper · ${f2(recAlpha)} measured here (log fit; ${f2(A.data.eligible.linear.alpha)} with a linear fit)` : "4.26 in the paper" },
-    A ? { label: "Eigenspectrum decay α of the fitted curves", hint: `closer to the recording's ${f2(recAlpha)} is better`, dg: f2(DGM.pca.log.alpha), paper: `${f2(P.pca.log.alpha)}${sub("4.34 in the paper")}`, run: f2(WM.pca.log.alpha), score: [DGM.pca.log.alpha, P.pca.log.alpha, WM.pca.log.alpha].map(v => -Math.abs(v - recAlpha)) }
-      : { label: "Eigenspectrum decay α of the fitted curves", dg: na, paper: "4.34", run: na },
-  ].filter(Boolean);
-  const cols = ["dg", "paper", "run"];
-  const cell = (r, c, i) => {
-    let best = r.best === c;
-    if (r.score) { const vals = r.score.map(v => (r.low ? -v : v)); best = vals[i] === Math.max(...vals); }
-    const v = String(r[c]), at = v.indexOf('<span class="sub">'), tag = best ? ' <span class="tag">best</span>' : "";
-    return `<td class="${best ? "best" : ""}">${at < 0 ? v + tag : v.slice(0, at) + tag + v.slice(at)}</td>`;
-  };
-  $("summary").innerHTML = `<thead><tr><th></th><th>Double Gaussian<span class="sub">the paper's baseline</span></th><th>Paper's equation<span class="sub">Tilbury et al. (2025)</span></th><th>This run's winner<span class="sub">program ${wid}</span></th></tr></thead><tbody>${rows.map(r =>
-    r.group ? `<tr class="group"><td colspan="4">${r.group}</td></tr>`
-    : `<tr><td>${r.label}${r.hint ? `<span class="hint">${r.hint}</span>` : ""}</td>${r.span ? `<td colspan="3">${r.span}</td>` : cols.map((c, i) => cell(r, c, i)).join("")}</tr>`).join("")}</tbody>`;
+  const wid = D.winner_id;
   drawDataSplit(D, A);
   drawFlow(D);
 

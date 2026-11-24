@@ -1,6 +1,6 @@
 # EDGAR runs page
 
-`index.html` shows every run on one page: a table comparing them under the title, then each run's full report in `runs.json` order. `#run=<id>` in the URL jumps to that run. Serve the folder over HTTP (for example `uv run python -m http.server -d docs/artifacts/edgar_runs`); the page loads `runs.json` and then each run's files.
+`index.html` shows every run on one page: one table with every statistic for the double Gaussian, the paper's equation and each run's winner, then each run's figures in `runs.json` order. `#run=<id>` in the URL jumps to that run. Serve the folder over HTTP (for example `uv run python -m http.server -d docs/artifacts/edgar_runs`); the page loads `runs.json` and then each run's files.
 
 To add a finished, rescored run:
 

@@ -16,3 +16,4 @@ Added the population analyses from Tilbury et al. (2025):
 - 24-generation hy4-flash-free run (20261124-005016-b0f216) added to the results page and leakage audit; twice the generations gave a winner that ties the 12-generation one.
 - The results page lists every run in a table under the title (model, generations, winner, locked-test score, cost); clicking a row shows that run. It opens on the first, 12-generation run.
 - The results page now shows every run on one page: each run's full report is stacked under the comparison table, in place of the run picker. The page declares UTF-8.
+- The results page has one main table with every statistic for every run (the double Gaussian and the paper's equation once, then each run's winner), in place of a run table plus a summary table per run.
