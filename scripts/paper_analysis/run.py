@@ -3,7 +3,7 @@
 Fits the double Gaussian seed, the run's winner, the paper's winning model and its Fig. 3e ablations to
 every eligible cell, then reports per-cell held-out R², peakiness, rcvPCA of the recording (Fig. 1d),
 PCA spectra of the fitted tuning curves (Fig. 3f), and rcvPCA on model curves plus the recording's own
-trial-to-trial noise (Fig. S1).
+trial-to-trial noise (Fig. S1). It also compares the winner's fitted curves with the paper's model, neuron by neuron.
 
     uv run python scripts/paper_analysis/run.py --run results/runs/<id> --dataset data/<file>.npy
 """
@@ -21,6 +21,7 @@ import numpy as np
 
 from edgar_study import fitting, geometry, paper_models
 from edgar_study.datasets import load_dataset, prepare
+from edgar_study.delta import delta_analysis
 from edgar_study.exponents import fitted_exponents
 from edgar_study.split_errors import split_errors
 from edgar_study.upstream import import_upstream, score_program, searched_programs
@@ -124,86 +125,32 @@ def peakiness(p1, p2):
     }
 
 
-def components(params, grid):
-    """Baseline, each peak and the wave of the AI model + wave, evaluated on `grid`."""
-    theta = jnp.asarray(grid)
-    peak_1 = params.copy()
-    peak_1[[1, 3]] = 0
-    peak_2 = params.copy()
-    peak_2[[1, 2]] = 0
-    return {
-        "baseline": [float(max(params[1], 0))] * len(grid),
-        "peak_1": np.asarray(paper_models.ai_model(theta, *peak_1[:11])),
-        "peak_2": np.asarray(paper_models.ai_model(theta, *peak_2[:11])),
-        "wave": params[11] * np.cos(grid) + params[12] * np.sin(grid),
-    }
-
-
-def wave_analysis(models, fitted, results, winner_id, x, y, n_examples=4):
-    """How large the one-cycle wave is, what it adds to the paper's model, and example decompositions."""
-    plain, waved = results["AI model"]["r2"], results["AI model + wave"]["r2"]
-    gain = waved - plain
-    params = fitted["AI model + wave"]
-    size = np.hypot(params[:, 11], params[:, 12]) / np.maximum(np.clip(params[:, 2], 0, None), 1e-9)
+def delta_block(models, fitted, results, winner_id, x, y):
+    """How the winner's fitted curves differ from the paper's equation's, with example neurons."""
     winner_name = f"EDGAR winner {winner_id}"
-    w = fitted[winner_name]
-    names = paper_models.parameter_names(models[winner_name][0])[: w.shape[1]]
-
-    def column(name, low, high):
-        return np.clip(w[:, names.index(name)], low, high) if name in names else np.zeros(len(w))
-
-    winner_wave = np.abs(
-        column("baseline_modulation", 0, 1.5) * np.exp(1j * column("baseline_phase", 0, 2 * np.pi))
-        + column("wrap_asymmetry", -1.5, 1.5) * np.exp(1j * column("theta_pref", 0, 2 * np.pi))
-    ) / np.maximum(column("amplitude_1", 0, 20), 1e-9)
-    edges = np.arange(0, 1.01, 0.05)
-    order = np.argsort(-gain)
-    picks = [order[0], order[1], order[len(order) // 10], order[len(order) // 2]][:n_examples]
     grid = np.linspace(0, 2 * np.pi, 181)
+    curves = {
+        name: predict(models[name][0], fitted[name], grid)
+        for name in ("Double Gaussian", "AI model", winner_name)
+    }
+    summary = delta_analysis(
+        results["AI model"]["r2"], results[winner_name]["r2"], curves["AI model"], curves[winner_name]
+    )
     examples = []
-    for k in picks:
+    for k in summary.pop("rows"):
         theta, response = np.asarray(x[k]), np.asarray(y[k])
         bins = (theta / (2 * np.pi) * 24).astype(int) % 24
-        curves = {
-            name: np.asarray(models[name][0](jnp.asarray(grid), *fitted[name][k]))
-            for name in ("Double Gaussian", "AI model", "AI model + wave", winner_name)
-        }
         examples.append(
             {
-                "row": int(k),
-                "r2": {
-                    name: float(results[name]["r2"][k])
-                    for name in ("Double Gaussian", "AI model", "AI model + wave", winner_name)
-                },
-                "wave_size": float(size[k]),
+                "row": k,
+                "r2": {name: float(results[name]["r2"][k]) for name in curves},
                 "means": [
                     [b * 15 + 7.5, float(response[bins == b].mean())] for b in range(24) if np.any(bins == b)
                 ],
-                "curves": {name: v.round(3).tolist() for name, v in curves.items()},
-                "components": {
-                    name: np.round(v, 3).tolist() for name, v in components(params[k], grid).items()
-                },
+                "curves": {name: v[k].round(3).tolist() for name, v in curves.items()},
             }
         )
-    return {
-        "r2_gain_over_ai_model": {
-            "median": float(np.median(gain)),
-            "mean": float(np.mean(gain)),
-            "share_better": float(np.mean(gain > 0)),
-            "hist": np.histogram(np.clip(gain, -0.02, 0.0599), bins=np.arange(-0.02, 0.0601, 0.005))[
-                0
-            ].tolist(),
-        },
-        "size_edges": edges.round(2).tolist(),
-        "size_hist": np.histogram(np.clip(size, 0, 0.999), bins=edges)[0].tolist(),
-        "winner_size_hist": np.histogram(np.clip(winner_wave, 0, 0.999), bins=edges)[0].tolist(),
-        "median_size": float(np.median(size)),
-        "winner_fitted_parameters": names,
-        "winner_median_size": float(np.median(winner_wave)),
-        "share_size_over_10pct": float(np.mean(size > 0.1)),
-        "grid_deg": (grid * 180 / np.pi).round(1).tolist(),
-        "examples": examples,
-    }
+    return {**summary, "grid_deg": (grid * 180 / np.pi).round(1).tolist(), "examples": examples}
 
 
 def example_cell(models, fitted, results, groups, x, y, fit_trials, held_out):
@@ -296,7 +243,6 @@ def main():
     models = {
         "Double Gaussian": (seeds.neuron_model_2_jax, seeds.parameter_estimator_2),
         **paper_models.LADDER,
-        "AI model + wave": (paper_models.ai_wave_model, paper_models.ai_wave_estimator),
         f"EDGAR winner {winner_id}": (winner_model, winner_estimator),
     }
 
@@ -335,7 +281,7 @@ def main():
         fitted[name] = params
         describe(name, entry, time.time() - fit_started)
 
-    wave = wave_analysis(models, fitted, results, winner_id, x, y)
+    delta = delta_block(models, fitted, results, winner_id, x, y)
     example = example_cell(models, fitted, results, groups, x, y, fit_trials, held_out)
     improved = improved_cells(models, fitted, results, groups, x, y)
 
@@ -375,7 +321,7 @@ def main():
         "data": data,
         "models": results,
         "all_cells_models": all_cells,
-        "wave": wave,
+        "delta": delta,
         "example_cell": example,
         "improved_cells": improved,
         "all_cells_count": int(len(every)),

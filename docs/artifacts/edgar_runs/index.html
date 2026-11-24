@@ -93,7 +93,12 @@ table.diff td.changed::before { content: ""; display: inline-block; width: 8px; 
 .chart .arrow { fill: none; stroke: var(--fg-2); stroke-width: 2; }
 .chart .loop { fill: none; stroke: var(--fg-2); stroke-width: 2; stroke-dasharray: 6 5; }
 section { display: grid; gap: 14px; }
-.figlabel { font: 500 12px/1.4 var(--font-data); color: var(--fg-3); letter-spacing: 0.04em; }
+.figlabel { font: 500 12px/1.4 var(--font-data); color: var(--fg-3); letter-spacing: 0.04em; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.fs-btn { font: 500 12px/1 var(--font-data); color: var(--fg-2); background: transparent; border: 1px solid var(--rule); border-radius: 6px; padding: 6px 9px; cursor: pointer; letter-spacing: 0; white-space: nowrap; }
+.fs-btn:hover { color: var(--fg); border-color: var(--fg-3); }
+section:fullscreen, section.expanded { background: var(--bg); overflow: auto; padding: 32px max(24px, 4vw); align-content: start; }
+section.expanded { position: fixed; inset: 0; z-index: 50; }
+section:fullscreen .multiples, section.expanded .multiples { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
 .caption { font-size: 15px; color: var(--fg-2); max-width: 720px; }
 .chart { position: relative; width: 100%; }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
@@ -132,7 +137,7 @@ ul.caveats { margin: 0; padding-left: 20px; display: grid; gap: 8px; max-width: 
 .meta { font: 12px/1.4 var(--font-data); color: var(--fg-3); margin: 2px 0 4px; }
 .runbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .runbar select { font: 500 13px/1.2 var(--font-data); color: var(--fg); background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 7px 10px; max-width: 100%; }
-.tip { position: absolute; pointer-events: none; background: var(--fg); color: var(--bg); font: 12px/1.45 var(--font-data); padding: 7px 9px; border-radius: 5px; white-space: nowrap; z-index: 5; transform: translate(-50%, calc(-100% - 10px)); }
+.tip { position: fixed; pointer-events: none; background: var(--fg); color: var(--bg); font: 12px/1.45 var(--font-data); padding: 7px 9px; border-radius: 5px; white-space: nowrap; z-index: 100; transform: translate(-50%, calc(-100% - 10px)); }
 footer { font-size: 13px; color: var(--fg-3); border-top: 1px solid var(--rule); padding-top: 14px; display: grid; gap: 4px; }
 a { color: var(--ai); }
 @media (prefers-reduced-motion: no-preference) { .chart path.reveal { transition: opacity .3s; } }
@@ -208,7 +213,26 @@ a { color: var(--ai); }
   </section>
 
   <section>
-    <div class="figlabel">FIGURE 1 · SEARCH PROGRESS</div>
+    <div class="figlabel">FIGURE 1 · WHAT THE WINNER CHANGES</div>
+    <h2>Where the winner's curve parts from the paper's equation</h2>
+    <p class="caption" id="delta-cap"></p>
+    <div class="legend">
+      <span><i class="key" style="background:var(--fg)"></i>mean response (15° bins)</span>
+      <span><i class="key" style="background:var(--dg)"></i>double Gaussian</span>
+      <span><i class="key" style="background:var(--paper)"></i>paper's equation</span>
+      <span><i class="key" style="background:var(--ai)"></i>this run's winner</span>
+    </div>
+    <div class="multiples" id="delta-cells"></div>
+    <p class="meta">Below each neuron: the winner's curve minus the paper's equation's, the part the winner adds or changes.</p>
+    <div class="pair">
+      <div><h3>How big is the difference?</h3><p class="meta" id="delta-size-cap"></p><div class="chart" id="delta-size"></div></div>
+      <div><h3>What it buys on held-out trials</h3><p class="meta" id="delta-gain-cap"></p><div class="chart" id="delta-gain"></div></div>
+    </div>
+  </section>
+
+
+  <section>
+    <div class="figlabel">FIGURE 2 · SEARCH PROGRESS</div>
     <h2>How the search went</h2>
     <p class="caption" id="search-cap"></p>
     <div class="legend" id="search-legend"></div>
@@ -220,7 +244,7 @@ a { color: var(--ai); }
   </section>
 
   <section>
-    <div class="figlabel">FIGURE 2 · FITTING ONE NEURON</div>
+    <div class="figlabel">FIGURE 3 · FITTING ONE NEURON</div>
     <h2>What fitting a neuron means</h2>
     <p class="caption" id="example-cap"></p>
     <div class="legend">
@@ -233,7 +257,7 @@ a { color: var(--ai); }
   </section>
 
   <section>
-    <div class="figlabel">FIGURE 3 · FIT VS HELD-OUT ERROR</div>
+    <div class="figlabel">FIGURE 4 · FIT VS HELD-OUT ERROR</div>
     <h2>Error on the trials each fit used, and on the trials it did not</h2>
     <p class="caption" id="split-cap"></p>
     <div class="legend">
@@ -244,7 +268,7 @@ a { color: var(--ai); }
   </section>
 
   <section>
-    <div class="figlabel">FIGURE 4 · PEAKINESS (paper Fig. 3d)</div>
+    <div class="figlabel">FIGURE 5 · PEAKINESS (paper Fig. 3d)</div>
     <h2>How sharp are the fitted peaks?</h2>
     <p class="caption" id="pcaption"></p>
     <div class="toggle" role="group" aria-label="Exponent shown">
@@ -256,7 +280,7 @@ a { color: var(--ai); }
   </section>
 
   <section>
-    <div class="figlabel">FIGURE 5 · EXAMPLE NEURONS</div>
+    <div class="figlabel">FIGURE 6 · EXAMPLE NEURONS</div>
     <h2>Where the extra parameters help</h2>
     <p class="caption" id="cells-cap"></p>
     <div class="legend" id="cells-legend"></div>
@@ -264,7 +288,7 @@ a { color: var(--ai); }
   </section>
 
   <section>
-    <div class="figlabel">FIGURE 6 · POPULATION GEOMETRY (paper Fig. 1c, 3f)</div>
+    <div class="figlabel">FIGURE 7 · POPULATION GEOMETRY (paper Fig. 1c, 3f)</div>
     <h2>Eigenspectrum decay</h2>
     <p class="caption" id="spec-cap"></p>
     <div class="toggle" role="group" aria-label="Cells">
@@ -277,14 +301,14 @@ a { color: var(--ai); }
   </section>
 
   <section>
-    <div class="figlabel">FIGURE 7 · ABLATIONS (paper Fig. 3e)</div>
+    <div class="figlabel">FIGURE 8 · ABLATIONS (paper Fig. 3e)</div>
     <h2>Which ingredients earn their parameters</h2>
     <p class="caption">The paper's equation built up one ingredient at a time, then this run's winner. Median per-neuron gain in held-out R² over the double Gaussian, on all 2,110 reliable neurons; higher is better. Our R² is over held-out trials, so trial noise caps it; the paper split along the stimulus axis instead.</p>
     <div class="chart" id="ablation"></div>
   </section>
 
   <section>
-    <div class="figlabel">FIGURE 8 · COST</div>
+    <div class="figlabel">FIGURE 9 · COST</div>
     <h2 id="time-title">Where the time went</h2>
     <p class="caption">Wall time during which at least one call of each stage was running, on an Apple M5 Pro (15 CPU cores, no GPU). LLM stages run concurrently with each other, so their bars overlap in time and do not sum to the total. Fitting runs on the event loop and does not overlap with the other CPU work.</p>
     <div class="chart" id="time"></div>
@@ -318,7 +342,7 @@ function showTip(host, x, y, html) {
   const box = host.getBoundingClientRect(), page = document.querySelector("main").getBoundingClientRect();
   tip.innerHTML = html; tip.hidden = false;
   const vb = host.querySelector("svg").viewBox.baseVal, k = box.width / vb.width;
-  let left = box.left + x * k + window.scrollX, top = box.top + y * k + window.scrollY;
+  let left = box.left + x * k, top = box.top + y * k;
   tip.style.left = left + "px"; tip.style.top = top + "px";
   const r = tip.getBoundingClientRect();
   if (r.left < 8) tip.style.left = (left + 8 - r.left) + "px";
@@ -351,6 +375,7 @@ fetch("runs.json").then(r => r.json()).then(async index => {
     drawFlow(base[0]);
     if (base[1]) drawValidation(base[1]); else $("validation").closest("section").hidden = true;
   });
+  addFullscreen(document.getElementById("overview"));
   route();
   window.addEventListener("hashchange", route);
 }).catch(failed);
@@ -359,6 +384,8 @@ function route() {
   const wanted = new URLSearchParams(location.hash.slice(1)).get("run");
   const i = RUNS.findIndex(r => r.id === wanted);
   const overview = document.getElementById("overview"), host = document.getElementById("study");
+  if (document.fullscreenElement) document.exitFullscreen();
+  document.querySelectorAll("section.expanded").forEach(x => setExpanded(x, false));
   hideTip();
   host.innerHTML = "";
   overview.hidden = i >= 0;
@@ -377,8 +404,10 @@ function showRun(i, host) {
     $("run-title").textContent = runTitle(D);
     render(D, A, N || {}, run);
     for (const sec of ["example", "split", "spectrum", "ablation"]) $(sec).closest("section").hidden = !A;
+    $("delta-cells").closest("section").hidden = !(A && A.delta && N && N.differences && N.differences.same_base);
     if (A) renderPaper(A);
   });
+  addFullscreen(root);
   document.title = `${runTitle(D)} · Reproducing Tilbury et al. (2025)`;
 }
 
@@ -781,6 +810,7 @@ const PAPER_NAME = "AI model";
 const winnerKey = A => Object.keys(A.models).find(k => k.startsWith("EDGAR winner"));
 
 function renderPaper(A) {
+  if (A.delta) drawDelta(A);
   drawExample(A);
   drawSplit(A);
   drawSpectrum(A, "eligible");
@@ -903,6 +933,128 @@ function drawAblation(A) {
 }
 
 const SHOWN = A => [["Double Gaussian", "double Gaussian", "var(--dg)"], [PAPER_NAME, "paper's equation", "var(--paper)"], [winnerKey(A), "this run's winner", "var(--ai)"]];
+function barHist(host, counts, edges, opts) {
+  host.innerHTML = "";
+  const w = 480, h = 240, m = { l: 44, r: 10, t: 12, b: 40 };
+  const s = svg(host, w, h);
+  const all = counts.concat(opts.outline || []), top = Math.max(...all) * 1.1;
+  const X = scale(edges[0], edges[edges.length - 1], m.l, w - m.r), Y = scale(0, top, h - m.b, m.t);
+  const st = top > 400 ? 200 : top > 150 ? 50 : 25;
+  for (let v = 0; v <= top; v += st) { el("line", { x1: m.l, x2: w - m.r, y1: Y(v), y2: Y(v), stroke: "var(--grid)" }, s); txt(s, m.l - 6, Y(v) + 4, String(v), { "text-anchor": "end" }); }
+  for (const t of opts.ticks) txt(s, X(t), h - m.b + 16, opts.fmt(t), { "text-anchor": "middle" });
+  txt(s, (m.l + w - m.r) / 2, h - 4, opts.xlabel, { "text-anchor": "middle", class: "lbl" });
+  counts.forEach((c, i) => {
+    if (!c) return;
+    const x0 = X(edges[i]) + 1, x1 = X(edges[i + 1]) - 1, y = Y(c), r = Math.min(3, (x1 - x0) / 2);
+    el("path", { d: `M${x0},${Y(0)}V${y + r}Q${x0},${y} ${x0 + r},${y}H${x1 - r}Q${x1},${y} ${x1},${y + r}V${Y(0)}Z`, fill: opts.color || "var(--ai)" }, s);
+  });
+  if (opts.outline) {
+    let d = `M${X(edges[0])},${Y(0)}`;
+    opts.outline.forEach((c, i) => { d += `V${Y(c)}H${X(edges[i + 1])}`; });
+    el("path", { d: d + `V${Y(0)}`, fill: "none", stroke: opts.outlineColor || "var(--fg)", "stroke-width": 2 }, s);
+  }
+  if (opts.zero !== undefined) el("line", { x1: X(opts.zero), x2: X(opts.zero), y1: m.t, y2: Y(0), stroke: "var(--fg-3)", "stroke-dasharray": "4 4" }, s);
+  counts.forEach((c, i) => {
+    const t = el("rect", { x: X(edges[i]), y: m.t, width: X(edges[i + 1]) - X(edges[i]), height: Y(0) - m.t, fill: "transparent" }, s);
+    t.addEventListener("pointerenter", () => showTip(host, (X(edges[i]) + X(edges[i + 1])) / 2, Y(Math.max(c, opts.outline ? opts.outline[i] : 0)), `${opts.fmt(edges[i])} to ${opts.fmt(edges[i + 1])}<br>${opts.tip(c, i)}`));
+    t.addEventListener("pointerleave", hideTip);
+  });
+}
+
+function drawDelta(A) {
+  const host = $("delta-cells"); host.innerHTML = "";
+  const Dl = A.delta, grid = Dl.grid_deg, wk = winnerKey(A);
+  const G = Dl.gain, Z = Dl.size;
+  $("delta-cap").innerHTML = `Four neurons: the two where the winner beats the paper's equation by most on held-out trials, one at the 90th percentile and the median one. ` +
+    `Across all ${A.cells.toLocaleString()} neurons the winner's curve differs from the paper's by a median ${Math.round(Z.median * 100)}% of the paper curve's range, and it does better on held-out trials for ${Math.round(G.share_better * 100)}% of them (worse for ${Math.round(G.share_worse * 100)}%).`;
+  for (const c of Dl.examples) {
+    const box = document.createElement("div"); box.className = "cell";
+    const gain = c.r2[wk] - c.r2[PAPER_NAME];
+    box.innerHTML = `<h3>Neuron ${c.row}</h3><div class="meta">held-out R²: paper's equation ${f3(c.r2[PAPER_NAME])} → winner ${f3(c.r2[wk])} (${gain >= 0 ? "+" : ""}${gain.toFixed(3)})</div>`;
+    const top = document.createElement("div"); top.className = "chart"; box.appendChild(top);
+    const bottom = document.createElement("div"); bottom.className = "chart"; box.appendChild(bottom);
+    host.appendChild(box);
+    const w = 320, m = { l: 34, r: 8, t: 8, b: 22 };
+    const X = scale(0, 360, m.l, w - m.r);
+    const line = (sv, Y, vals, color, extra = {}) => el("path", { d: vals.map((v, i) => `${i ? "L" : "M"}${X(grid[i]).toFixed(1)},${Y(v).toFixed(1)}`).join(""), fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round", ...extra }, sv);
+    const frame = (sv, Y, ymin, ymax, h) => {
+      const span = ymax - ymin, st = span > 20 ? 10 : span > 8 ? 4 : span > 3 ? 2 : span > 1.2 ? 0.5 : span > 0.4 ? 0.2 : 0.05;
+      for (let v = Math.ceil(ymin / st) * st; v <= ymax + 1e-9; v += st) { const vv = Math.round(v / st) * st; el("line", { x1: m.l, x2: w - m.r, y1: Y(vv), y2: Y(vv), stroke: Math.abs(vv) < 1e-9 ? "var(--fg-3)" : "var(--grid)" }, sv); txt(sv, m.l - 5, Y(vv) + 4, String(+vv.toFixed(2)), { "text-anchor": "end", style: "font-size:10px" }); }
+      for (const a of [0, 90, 180, 270, 360]) txt(sv, X(a), h - m.b + 15, a + "°", { "text-anchor": "middle", style: "font-size:10px" });
+    };
+    const fits = c.curves, h1 = 200;
+    const ys = c.means.map(q => q[1]).concat(...Object.values(fits));
+    const y1max = Math.max(...ys) * 1.08, y1min = Math.min(0, ...ys);
+    const s1 = svg(top, w, h1), Y1 = scale(y1min, y1max, h1 - m.b, m.t);
+    frame(s1, Y1, y1min, y1max, h1);
+    line(s1, Y1, fits["Double Gaussian"], "var(--dg)");
+    line(s1, Y1, fits[PAPER_NAME], "var(--paper)");
+    line(s1, Y1, fits[wk], "var(--ai)");
+    for (const mn of c.means) el("rect", { x: X(mn[0]) - 3, y: Y1(mn[1]) - 3, width: 6, height: 6, rx: 1, fill: "var(--fg)", stroke: "var(--bg)", "stroke-width": 1.5 }, s1);
+    const diff = fits[wk].map((v, i) => v - fits[PAPER_NAME][i]), h2 = 130;
+    const lim = Math.max(0.05, ...diff.map(Math.abs)) * 1.15;
+    const s2 = svg(bottom, w, h2), Y2 = scale(-lim, lim, h2 - m.b, m.t);
+    frame(s2, Y2, -lim, lim, h2);
+    el("path", { d: diff.map((v, i) => `${i ? "L" : "M"}${X(grid[i]).toFixed(1)},${Y2(v).toFixed(1)}`).join("") + `L${X(360)},${Y2(0)}L${X(0)},${Y2(0)}Z`, fill: "var(--ai)", "fill-opacity": 0.18 }, s2);
+    line(s2, Y2, diff, "var(--ai)", { "stroke-width": 2.5 });
+    for (const [sv, Y, hh, ch, fmt] of [[s1, Y1, h1, top, i => `${Math.round(grid[i])}° · double Gaussian ${f2(fits["Double Gaussian"][i])} · paper's equation ${f2(fits[PAPER_NAME][i])} · winner ${f2(fits[wk][i])}`], [s2, Y2, h2, bottom, i => `${Math.round(grid[i])}° · winner − paper's equation ${diff[i] >= 0 ? "+" : ""}${diff[i].toFixed(2)}`]]) {
+      const cross = el("line", { y1: m.t, y2: hh - m.b, stroke: "var(--fg-3)", visibility: "hidden" }, sv);
+      const hit = el("rect", { x: m.l, y: m.t, width: w - m.l - m.r, height: hh - m.t - m.b, fill: "transparent" }, sv);
+      hit.addEventListener("pointermove", e => {
+        const pt = sv.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+        const q = pt.matrixTransform(sv.getScreenCTM().inverse());
+        const i = Math.max(0, Math.min(grid.length - 1, Math.round(X.inv(q.x) / 2)));
+        cross.setAttribute("x1", X(grid[i])); cross.setAttribute("x2", X(grid[i])); cross.setAttribute("visibility", "visible");
+        showTip(ch, X(grid[i]), m.t + 4, fmt(i));
+      });
+      hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+    }
+  }
+  $("delta-size-cap").innerHTML = `Largest gap between the two fitted curves, as a share of the paper curve's range, per neuron. Median ${Math.round(Z.median * 100)}%; over 10% for ${Math.round(Z.share_over_10pct * 100)}% of neurons.`;
+  barHist($("delta-size"), Z.hist, Z.edges, { ticks: [0, 0.25, 0.5, 0.75, 1], fmt: v => `${Math.round(v * 100)}%`, xlabel: "largest gap ÷ paper curve's range (≥100% pooled)", tip: c => `${c} neurons` });
+  $("delta-gain-cap").innerHTML = `Change in held-out R² per neuron, winner minus paper's equation; right of the dashed line is better. Median ${G.median >= 0 ? "+" : ""}${G.median.toFixed(4)}.`;
+  barHist($("delta-gain"), G.hist, G.edges, { ticks: [-0.02, 0, 0.02, 0.04, 0.06], fmt: v => (v > 0 ? "+" : "") + v.toFixed(2), xlabel: "R² gain (ends pooled)", zero: 0, tip: c => `${c} neurons` });
+}
+
+function addFullscreen(root) {
+  root.querySelectorAll("section").forEach(sec => {
+    const label = sec.querySelector(".figlabel");
+    if (!label || label.querySelector(".fs-btn") || !sec.querySelector("svg, #datasplit > *")) return;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "fs-btn"; b.textContent = "⤢ Full screen";
+    b.onclick = () => toggleFullscreen(sec);
+    label.appendChild(b);
+  });
+}
+
+function toggleFullscreen(sec) {
+  const on = !sec.classList.contains("expanded");
+  setExpanded(sec, on);
+  if (on && sec.requestFullscreen) sec.requestFullscreen().catch(() => {});
+  if (!on && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+
+function setExpanded(sec, on) {
+  document.querySelectorAll("section.expanded").forEach(x => { if (x !== sec) x.classList.remove("expanded"); });
+  sec.classList.toggle("expanded", on);
+  document.body.style.overflow = on ? "hidden" : "";
+  syncFullscreen();
+}
+
+function syncFullscreen() {
+  const open = document.querySelector("section.expanded");
+  (open || document.body).appendChild(tip);
+  hideTip();
+  document.querySelectorAll(".fs-btn").forEach(b => { b.textContent = b.closest("section") === open ? "✕ Exit full screen" : "⤢ Full screen"; });
+  window.dispatchEvent(new Event("resize"));
+}
+
+document.addEventListener("fullscreenchange", () => {
+  const x = document.querySelector("section.expanded");
+  if (!document.fullscreenElement && x) setExpanded(x, false); else syncFullscreen();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") { const x = document.querySelector("section.expanded"); if (x) setExpanded(x, false); } });
+
 function binMeans(xs, ys, width = 30) {
   const n = 360 / width, sum = Array(n).fill(0), cnt = Array(n).fill(0);
   xs.forEach((x, i) => { const b = Math.min(n - 1, Math.floor((x * 180 / Math.PI) / width)); sum[b] += ys[i]; cnt[b]++; });

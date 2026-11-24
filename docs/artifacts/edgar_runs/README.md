@@ -1,6 +1,6 @@
 # EDGAR runs page
 
-`index.html` opens on an overview: one table with every statistic for the double Gaussian, the paper's equation and each run's winner, then the figures that are the same for every run (data split, search, rcvPCA validation). Clicking a run opens its own view at `#run=<id>`: the equation, a table of how it differs from the paper's equation (`differences` in `notes.json`), its charts and caveats. `#run=<id>` in the URL jumps to that run. Serve the folder over HTTP (for example `uv run python -m http.server -d docs/artifacts/edgar_runs`); the page loads `runs.json` and then each run's files.
+`index.html` opens on an overview: one table with every statistic for the double Gaussian, the paper's equation and each run's winner, then the figures that are the same for every run (data split, search, rcvPCA validation). Clicking a run opens its own view at `#run=<id>`: the equation, a table of how it differs from the paper's equation (`differences` in `notes.json`), a figure of where its fitted curves part from the paper's equation (`delta` in `paper_analysis.json`), its charts and caveats. Every chart has a full-screen button. `#run=<id>` in the URL jumps to that run. Serve the folder over HTTP (for example `uv run python -m http.server -d docs/artifacts/edgar_runs`); the page loads `runs.json` and then each run's files.
 
 To add a finished, rescored run:
 
