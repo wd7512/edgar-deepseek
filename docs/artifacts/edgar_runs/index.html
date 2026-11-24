@@ -152,6 +152,18 @@ a { color: var(--ai); }
     <div class="tbl-wrap"><table class="summary runs" id="runs-table" aria-label="Every statistic for the double Gaussian, the paper's equation and each run's winner"></table></div>
   </header>
 
+  <section id="null-section" hidden>
+    <div class="figlabel">IS THE LLM NEEDED?</div>
+    <h2 id="null-title"></h2>
+    <div class="prose"><p class="caption" id="null-cap"></p></div>
+    <div class="legend">
+      <span><i class="key" style="background:var(--ai)"></i>LLM writes the equations</span>
+      <span><i class="key" style="background:var(--wave)"></i>genetic programming, no LLM</span>
+    </div>
+    <div class="chart" id="null-chart"></div>
+    <div class="tbl-wrap"><table class="summary" id="null-table" aria-label="Every LLM winner against every no-LLM winner on the locked-test neurons"></table></div>
+  </section>
+
 
   <section>
     <div class="figlabel">FIGURE 1 · THE DATA</div>
@@ -375,6 +387,8 @@ fetch("runs.json").then(r => r.json()).then(async index => {
     drawFlow(base[0]);
     if (base[1]) drawValidation(base[1]); else $("validation").closest("section").hidden = true;
   });
+  const T = await fetch("null_test.json").then(r => (r.ok ? r.json() : null)).catch(() => null);
+  if (T) within(document.getElementById("overview"), () => drawNull(T));
   addFullscreen(document.getElementById("overview"));
   route();
   window.addEventListener("hashchange", route);
@@ -437,7 +451,7 @@ function drawMainTable(all) {
   const rows = [
     { group: "The search" },
     { label: "Code-writing model", dg: "none, written by hand", paper: "Gemini 2.0 Flash, 2.5 Flash every third generation", vals: per(r => r.D.run.model) },
-    { label: "Generations", dg: dash, paper: dash, vals: per(r => { const stop = r.D.run.stopped_early, n = r.D.run.iterations ?? 12; return stop ? `${stop.generations_completed} of ${n}${sub(`stopped at the $9.50 spend cap; winner picked from the ${stop.programs} programs scored by then`)}` : String(n); }) },
+    { label: "Generations", dg: dash, paper: dash, vals: per(r => { const stop = r.D.run.stopped_early, n = r.D.run.iterations ?? 12; return stop ? `${stop.generations_completed} of ${n}${sub(stop.reason ? `stopped at the ${stop.reason}` : `stopped at the $9.50 spend cap; winner picked from the ${stop.programs} programs scored by then`)}` : String(n); }) },
     { label: "Candidates proposed", dg: dash, paper: "576", vals: per(r => `${r.D.run.proposals}${sub(`${r.D.run.scored} ran`)}`) },
     { label: "Wall time · LLM cost", hint: "lower is better", dg: dash, paper: "about 45 min · $8.25", vals: per(r => `${r.D.run.hours.toFixed(1)} h · ${r.D.run.list_cost_usd ? `$${r.D.run.list_cost_usd.toFixed(2)}${sub("at list price")}` : "free"}`) },
     { label: "Fitted exponent p first appeared", hint: "later means it was found rather than recalled", dg: dash, paper: "after several generations", vals: per(r => `generation ${r.D.first_exponent_gen ?? "–"}${sub(`${r.D.exp_programs} of ${r.D.run.scored} candidates fit one`)}`) },
@@ -487,6 +501,53 @@ function drawMainTable(all) {
   host.innerHTML = `<thead><tr><th></th><th>Double Gaussian<span class="sub">the paper's baseline</span></th><th>Paper's equation<span class="sub">Tilbury et al. (2025)</span></th>${head}</tr></thead><tbody>${body}</tbody>`;
 }
 
+function armColor(proposer) {
+  return /PySR/.test(proposer) ? "var(--fg-3)" : /no LLM/.test(proposer) ? "var(--wave)" : "var(--ai)";
+}
+
+function runName(id) {
+  const i = RUNS.findIndex(r => r.id === id), D = i >= 0 ? LOADED[i][0] : null;
+  return i >= 0 ? `Run ${i + 1} · ${D ? D.run.model : id}` : id;
+}
+
+function drawNull(T) {
+  $("null-section").hidden = false;
+  const llm = T.runs.filter(r => r.arm === "llm"), nul = T.runs.filter(r => r.arm === "null");
+  const won = T.pairs.filter(p => p.reject_null).length;
+  const meanGain = rs => rs.reduce((a, r) => a + r.gain_over_double_gaussian, 0) / rs.length;
+  const share = meanGain(nul) / meanGain(llm);
+  $("null-title").textContent = T.rejected_in_every_pairing
+    ? `Yes: every LLM winner beats every no-LLM winner (${won} of ${T.pairs.length} pairings)`
+    : `Not clearly: the LLM winner is better in ${won} of ${T.pairs.length} pairings`;
+  $("null-cap").textContent = `Null hypothesis: a search with no language model, given the same seeds, islands, budget of ${nul[0]?.proposals ?? 576} candidates, fitter and scoring, finds equations as good as the LLM's. Genetic programming replaces only the LLM: it edits expression trees (operators +, −, ×, ÷, power, exp, cos, sin, abs, a circular difference and a sign switch) whose numbers are fitted per neuron, and it searches on half the discovery neurons to stay near an hour. Every winner is picked on the selection neurons and scored once on the ${T.locked_cells} locked-test neurons. The bars below are each winner's change in locked-test score against the double Gaussian, with a 95% bootstrap interval over neurons; left is better. On average the no-LLM searches recover ${Math.round(100 * share)}% of the LLM winners' gain. An off-the-shelf reference, PySR, searched for 55 minutes for one formula with six per-neuron parameters and did far worse (locked-test score 40.6, against 28.6 for the double Gaussian): its optimiser could not fit each neuron's preferred direction, even on clean synthetic tuning curves where it was handed the right form, so it is left out of the comparison.`;
+  const rows = [...llm, ...nul], host = $("null-chart");
+  const v = id => T.vs_double_gaussian[id];
+  const w = 1000, rowH = 34, m = { l: 260, r: 170, t: 28, b: 40 }, h = m.t + m.b + rowH * rows.length;
+  const s = svg(host, w, h);
+  const lo = Math.min(...rows.map(r => v(r.run).low)), hi = Math.max(0.02, ...rows.map(r => v(r.run).high));
+  const X = scale(lo - 0.02, hi + 0.01, m.l, w - m.r);
+  for (let t = Math.ceil((lo - 0.02) / 0.05) * 0.05; t <= hi + 0.01; t += 0.05) {
+    el("line", { x1: X(t), x2: X(t), y1: m.t, y2: h - m.b, stroke: Math.abs(t) < 1e-9 ? "var(--fg-3)" : "var(--grid)" }, s);
+    txt(s, X(t), h - m.b + 18, (t > 1e-9 ? "+" : t < -1e-9 ? "−" : "") + Math.abs(t).toFixed(2), { "text-anchor": "middle" });
+  }
+  txt(s, X(0), m.t - 10, "double Gaussian", { class: "lbl", "text-anchor": "middle" });
+  txt(s, w - m.r + 16, m.t - 10, "locked-test score", { class: "lbl" });
+  txt(s, (m.l + w - m.r) / 2, h - 6, "change in locked-test score vs the double Gaussian (lower is better)", { "text-anchor": "middle", class: "lbl" });
+  rows.forEach((r, i) => {
+    const y = m.t + i * rowH + rowH / 2, b = v(r.run), color = armColor(r.proposer);
+    txt(s, m.l - 12, y + 4, runName(r.run) + (r.seed != null && r.arm === "null" ? ` · seed ${r.seed}` : ""), { "text-anchor": "end", class: "lbl" });
+    el("line", { x1: X(b.low), x2: X(b.high), y1: y, y2: y, stroke: color, "stroke-width": 2 }, s);
+    el("circle", { cx: X(b.delta), cy: y, r: 6, fill: color, stroke: "var(--bg)", "stroke-width": 2 }, s);
+    txt(s, w - m.r + 16, y + 4, `${r.locked_score.toFixed(3)} · ${r.parameters} params`, { class: "lbl" });
+    const t = el("rect", { x: 0, y: y - rowH / 2, width: w, height: rowH, fill: "transparent" }, s);
+    t.addEventListener("pointerenter", () => showTip(host, X(b.delta), y - 8, `${runName(r.run)}<br>locked-test score ${r.locked_score.toFixed(3)}<br>vs double Gaussian ${b.delta.toFixed(3)} [${b.low.toFixed(3)}, ${b.high.toFixed(3)}]`));
+    t.addEventListener("pointerleave", hideTip);
+  });
+  const name = id => { const r = T.runs.find(x => x.run === id); return runName(id) + (r && r.arm === "null" && r.seed != null ? ` · seed ${r.seed}` : ""); };
+  const verdict = p => (p.reject_null ? "LLM better" : p.low > 0 ? "no-LLM better" : "no clear difference");
+  $("null-table").innerHTML = `<thead><tr><th>LLM winner</th><th>No-LLM winner</th><th>Difference<span class="sub">LLM − no-LLM locked-test score; below 0 favours the LLM</span></th><th>95% interval</th><th>Verdict</th></tr></thead><tbody>${T.pairs.map(p => `<tr><td>${name(p.llm)}</td><td>${name(p.null)}</td><td>${p.delta.toFixed(3)}</td><td>[${p.low.toFixed(3)}, ${p.high.toFixed(3)}]</td><td class="${p.reject_null ? "best" : ""}">${verdict(p)}</td></tr>`).join("")}</tbody>`;
+}
+
 function failed() {
   document.getElementById("page-lede").textContent = "The run data did not load. Reload the page to try again.";
 }
@@ -518,11 +579,14 @@ function render(D, A, N, run) {
   $("footer-run").textContent = `Data: run ${D.run.id} at commit ${D.run.sha}, rescored on the strict-holdout-v1 split.${A ? ` Population analyses refit every model to all ${A.cells.toLocaleString()} reliable cells.` : ""}`;
 
   drawSearch(D, A);
-  drawHist(D, A, "min");
   const root = ROOT;
-  $("p-min").onclick = () => within(root, () => drawHist(D, A, "min"));
-  $("p-dom").hidden = !D.pmin.dom_hist;
-  $("p-dom").onclick = () => within(root, () => drawHist(D, A, "dom"));
+  $("p-min").closest("section").hidden = !D.pmin;
+  if (D.pmin) {
+    drawHist(D, A, "min");
+    $("p-min").onclick = () => within(root, () => drawHist(D, A, "min"));
+    $("p-dom").hidden = !D.pmin.dom_hist;
+    $("p-dom").onclick = () => within(root, () => drawHist(D, A, "dom"));
+  }
   drawCells(D, A);
   drawTime(D);
 
@@ -637,12 +701,13 @@ function drawSearch(D, A) {
   const s = svg(host, w, h);
   const islands = Math.max(...D.programs.map(p => p.i)) + 1, slots = Math.max(...D.programs.map(p => p.b)) + 1;
   const per = islands * slots, gens = D.generations.length, n = gens * per, seed = D.seeds["1"];
-  const paper = A && A.models[PAPER_NAME].split_errors ? MSE_SCALE * A.models[PAPER_NAME].split_errors.discovery.held_out + PENALTY * A.models[PAPER_NAME].parameters : null;
+  const llm = !/no LLM/.test(D.run.model);
+  const paper = llm && A && A.models[PAPER_NAME].split_errors ? MSE_SCALE * A.models[PAPER_NAME].split_errors.discovery.held_out + PENALTY * A.models[PAPER_NAME].parameters : null;
   const best0 = Math.min(seed, paper ?? Infinity, ...D.programs.map(p => p.loss));
   const y0 = Math.floor((best0 - 0.2) * 5) / 5, y1 = Math.ceil((seed + (seed - best0) * 0.8 + 0.4) * 5) / 5;
   const yStep = (y1 - y0) > 3 ? 1 : (y1 - y0) > 1.2 ? 0.4 : 0.2;
   const X = scale(0, n, m.l, w - m.r), Y = scale(y0, y1, h - m.b, m.t);
-  for (let g = 0; g < gens; g += 3) el("rect", { x: X(g * per), y: m.t, width: X(per) - X(0), height: h - m.t - m.b, fill: "var(--panel)" }, s);
+  for (let g = 0; llm && g < gens; g += 3) el("rect", { x: X(g * per), y: m.t, width: X(per) - X(0), height: h - m.t - m.b, fill: "var(--panel)" }, s);
   for (let v = y0; v <= y1 + 1e-9; v += yStep) {
     el("line", { x1: m.l, x2: w - m.r, y1: Y(v), y2: Y(v), stroke: "var(--grid)" }, s);
     txt(s, m.l - 8, Y(v) + 4, v.toFixed(1), { "text-anchor": "end" });
@@ -677,9 +742,9 @@ function drawSearch(D, A) {
     txt(s, X(win.idx + 0.5), Y(win.loss) + 22, "winner", { "text-anchor": "middle", class: "lbl-strong" });
   }
   for (const l of placeLabels(labels)) txt(s, w - m.r + 8, l.y + 4, l.text, { class: l.strong ? "lbl-strong" : "lbl" });
-  txt(s, X(0) + 6, m.t + 14, "high reasoning", { class: "lbl" });
+  if (llm) txt(s, X(0) + 6, m.t + 14, "high reasoning", { class: "lbl" });
   if (above) txt(s, w - m.r, m.t - 2, `${above} candidates above ${y1.toFixed(1)} not shown`, { "text-anchor": "end" });
-  $("search-cap").textContent = `Every candidate the language model wrote, in the order it was written, scored on the ${(D.cell_counts?.discovery ?? 0).toLocaleString()} discovery neurons: 10 × held-out error + 0.01 × parameters per neuron. Dashed lines: the double Gaussian${paper != null ? " and the paper's equation, scored the same way on the same neurons" : ""}. The ringed candidate became the winner after re-scoring on selection neurons. Shaded generations used the high-reasoning tier, standing in for the paper's Gemini 2.5 Flash.`;
+  $("search-cap").textContent = `Every candidate the ${llm ? "language model" : "genetic programming"} wrote, in the order it was written, scored on ${llm ? "the" : "a fixed random half of the"} ${(D.cell_counts?.discovery ?? 0).toLocaleString()} discovery neurons: 10 × held-out error + 0.01 × parameters per neuron. Dashed lines: the double Gaussian${paper != null ? " and the paper's equation, scored the same way on the same neurons" : ""}. The ringed candidate became the winner after re-scoring on selection neurons.${llm ? " Shaded generations used the high-reasoning tier, standing in for the paper's Gemini 2.5 Flash." : ""}`;
   $("search-legend").innerHTML = `<span><i class="key dot" style="background:var(--dot)"></i>candidate</span><span><i class="key" style="background:var(--ai)"></i>best so far</span><span><i class="key ring" style="color:var(--ai)"></i>winner</span><span><i class="key dash" style="color:var(--dg)"></i>double Gaussian</span>${paper != null ? `<span><i class="key dash" style="color:var(--paper)"></i>paper's equation</span>` : ""}`;
   const ring = el("circle", { r: 6, fill: "none", stroke: "var(--fg)", "stroke-width": 2, visibility: "hidden" }, s);
   const hit = el("rect", { x: m.l, y: m.t, width: w - m.l - m.r, height: h - m.t - m.b, fill: "transparent" }, s);

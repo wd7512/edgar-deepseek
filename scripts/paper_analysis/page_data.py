@@ -139,7 +139,16 @@ data = {
         "scored": rep["programs_scored"],
         "sha": man["repo_sha"][:7],
         "model": man["models"]["proposer"],
-        "stopped_early": man.get("recovered") or man.get("stopped_early"),
+        "stopped_early": man.get("recovered")
+        or (
+            {
+                "generations_completed": man["generations_completed"],
+                "programs": rep["programs_scored"],
+                "reason": f"{man['time_limit_min']:.0f}-minute time limit",
+            }
+            if man.get("stopped_early")
+            else None
+        ),
         "iterations": man["iterations"],
         "list_cost_usd": rep.get("list_cost_usd", 0.0),
         "timings": man["timings"],

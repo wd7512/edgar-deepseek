@@ -12,3 +12,12 @@ uv run python -m edgar_study.run_index docs/artifacts/edgar_runs
 ```
 
 `paper_analysis.json` (about two minutes per run on 15 CPU cores, five of them for the all-cells fits) is optional; without it the population sections are hidden. An optional `notes.json` holds the run's hand-written equation and caveats (`equation_title`, `equation_caption`, `equation_html`, `caveats`).
+
+## Is the LLM needed?
+
+The overview's "Is the LLM needed?" section reads `null_test.json`, written by `scripts/null_compare/run.py`. It refits every LLM winner, every no-LLM winner and the double Gaussian on the locked-test neurons and runs a paired bootstrap over neurons for each LLM–no-LLM pair; the section is hidden when the file is absent. No-LLM runs come from `edgar null-search` (genetic programming inside upstream's unchanged search) and are added like any other run; their model shows as "GP (no LLM)", which also drops the LLM-only parts of the search figure. To refresh it:
+
+```sh
+uv run python scripts/null_compare/run.py --dataset data/gratings_drifting_GT1_2019_04_12_1.npy --llm results/runs/<llm run>... --null results/runs/<gp run>... --out results/null_test.json
+cp results/null_test.json docs/artifacts/edgar_runs/null_test.json
+```

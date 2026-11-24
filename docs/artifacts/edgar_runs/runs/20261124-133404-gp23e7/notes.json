@@ -1,0 +1,53 @@
+{
+ "equation_title": "the double Gaussian with an exponent on each peak and a narrower second peak",
+ "equation_caption": "Found by genetic programming with no language model (seed 2). The double Gaussian's two peaks with one shared width, each peak raised to its own fitted exponent, the second peak allowed its own sharpness and a small offset from the opposite direction.",
+ "equation_html": "<div><span class=\"term\">Paper's equation (11 parameters):</span>&ensp;<span class=\"term\">f(θ) = b + A₁ exp[−½ (|θ−φ₁| / σ₁±)<sup>p₁</sup>] + A₂ exp[−½ (|θ−φ₂| / σ₂±)<sup>p₂</sup>]</span></div><div><span class=\"term\">This run's winner (9 parameters):</span>&ensp;<span class=\"term\">f(θ) = b + A₁ exp[−½ (|d₁| / σ)<sup class=\"new\">p₁</sup>] + A₂ exp[−(½ <span class=\"new\">− s</span>) (|d₂ <span class=\"new\">+ δ</span>| / σ)<sup class=\"new\">p₂</sup>]</span>, <span class=\"term\">d₁ = θ − φ, d₂ = wrap(θ − φ − π)</span></div>",
+ "caveats": [
+  "<strong>No language model.</strong> Upstream's search ran unchanged (seeds, 8 islands × 6 programs × 12 generations, selection, migration, the <code>lm-bounded</code> fitter and scoring), but every program was written by genetic programming: crossover and random edits of expression trees whose numbers are fitted per neuron. Translation to JAX and the parameter estimator are generated from the tree. No API was called and the run cost nothing.",
+  "<strong>Half the discovery neurons.</strong> To keep the run near an hour, the search scored candidates on a fixed random half of the 1,055 discovery neurons (<code>--cell-fraction 0.5</code>). The winner is still picked on all 527 selection neurons and scored once on the 528 locked-test neurons, like every other run.",
+  "<strong>Fitted exponents from the first generation.</strong> One of the GP's edits turns a constant 2 into a fitted parameter while leaving the curve unchanged, so the double Gaussian's square becomes a fitted exponent within a step. This is the move that makes the paper's equation reachable without prior knowledge; it was added after a first GP version, whose seed tree was too large to edit, never improved on the double Gaussian."
+ ],
+ "differences": {
+  "same_base": false,
+  "summary": "The double Gaussian plus a fitted exponent on each peak, a sharpness s that in effect gives the second peak its own width, and a small offset for the second peak. It lacks the paper's separate left and right widths.",
+  "rows": [
+   {
+    "part": "baseline",
+    "paper": "b ≥ 0",
+    "winner": "b between 0 and 100",
+    "changed": false
+   },
+   {
+    "part": "peaks",
+    "paper": "two peaks, each with its own centre",
+    "winner": "second peak opposite the first, moved by a fitted offset δ, with its own sharpness s",
+    "changed": true
+   },
+   {
+    "part": "widths",
+    "paper": "separate left and right width for each peak (4)",
+    "winner": "one width shared by both peaks and both sides",
+    "changed": true
+   },
+   {
+    "part": "exponents",
+    "paper": "one exponent per peak (2), between 0.1 and 10",
+    "winner": "one per peak (2), between 0.1 and 8",
+    "changed": true
+   },
+   {
+    "part": "extra terms",
+    "paper": "none",
+    "winner": "none",
+    "changed": false
+   },
+   {
+    "part": "parameters",
+    "paper": "11",
+    "winner": "9",
+    "changed": true
+   }
+  ]
+ },
+ "unused_parameters": []
+}
