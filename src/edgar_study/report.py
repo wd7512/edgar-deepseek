@@ -71,7 +71,8 @@ def report(args):
     np.minimum.at(best, index, loss)
     best = np.minimum.accumulate(best)
 
-    calls = [json.loads(line) for line in (run_dir / "api_calls.jsonl").read_text().splitlines()]
+    calls_path = run_dir / "api_calls.jsonl"
+    calls = [json.loads(line) for line in calls_path.read_text().splitlines()] if calls_path.exists() else []
     by_role = collections.defaultdict(list)
     for call in calls:
         by_role[call["role"]].append(call)
