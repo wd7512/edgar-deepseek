@@ -33,7 +33,7 @@ IMAGE_READER_PROMPT = (
     "for several neurons: scatter points are raw responses, the blue curve is the binned data "
     "mean, and the coloured curves are candidate models (red is the best model, green the "
     "second best). For each subplot, describe concisely where each model curve deviates from "
-    "the binned mean: peak height, peak sharpness or cusp shape, width, asymmetry, baseline, "
+    "the binned mean: peak height, peak sharpness, width, skewness, baseline, "
     "second peak position and amplitude. Finish with the systematic weaknesses shared across subplots."
 )
 

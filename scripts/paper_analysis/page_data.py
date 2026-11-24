@@ -11,11 +11,10 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pandas as pd
 
 from edgar_study import fitting
 from edgar_study.datasets import load_dataset, prepare
-from edgar_study.upstream import combined_file, import_upstream, score_program
+from edgar_study.upstream import combined_file, import_upstream, score_program, searched_programs
 
 ROOT = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -31,8 +30,7 @@ res = json.loads((RUN / "rescore.json").read_text())
 rep = json.loads((RUN / "report.json").read_text())
 man = json.loads((RUN / "manifest.json").read_text())
 
-db = pd.read_csv(combined_file(RUN, "programs_db.csv"))
-db = db[db.iteration_number >= 0]
+db = searched_programs(RUN)
 census = np.load(combined_file(RUN, "census.npy"), allow_pickle=True)
 programs = [
     {"g": int(r[0]), "i": int(r[1]), "b": int(r[2]), "loss": round(float(r[4]), 4)}

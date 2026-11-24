@@ -18,12 +18,11 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pandas as pd
 
 from edgar_study import fitting, geometry, paper_models
 from edgar_study.datasets import load_dataset, prepare
 from edgar_study.split_errors import split_errors
-from edgar_study.upstream import combined_file, import_upstream, score_program
+from edgar_study.upstream import import_upstream, score_program, searched_programs
 
 log = logging.getLogger("paper_analysis")
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,7 +35,7 @@ KEPT_DIMENSIONS = 128
 def winner(run_dir, utils):
     rescore = json.loads((run_dir / "rescore.json").read_text())
     best = rescore["winner"]
-    frame = pd.read_csv(combined_file(run_dir, "programs_db.csv"))
+    frame = searched_programs(run_dir)
     ids = (
         frame.iteration_number.astype(str)
         + "_"

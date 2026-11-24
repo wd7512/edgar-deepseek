@@ -1,6 +1,7 @@
 """Strict holdout after a run: pick the winner on validation cells, then score it once on locked cells.
 
-Candidates are the top programs by discovery loss from upstream's final database. Both Gaussian
+Candidates are the top programs by discovery loss from upstream's final island databases (see
+`searched_programs`: the combined database is deduplicated on held-out cells). Both Gaussian
 seeds are always scored as references. Settings match upstream's final evaluation (Adam, up to
 2,000 steps, trial split seed 0, penalty 0.01 per parameter).
 """
@@ -11,14 +12,13 @@ import time
 from typing import Any
 
 from edgar_study import fitting, timing
-from edgar_study.upstream import code_key, combined_file, import_upstream, score_program
+from edgar_study.upstream import code_key, import_upstream, score_program, searched_programs
 
 MAX_ITER = 2_000  # upstream's final evaluation
 
 
 def rescore(args):
     import numpy as np
-    import pandas as pd
 
     from edgar_study.datasets import load_dataset, prepare
 
@@ -31,9 +31,7 @@ def rescore(args):
     fitter = fitting.install(upstream["hypothesis_engine"], args.fitter or run_fitter)
     timings = timing.Timings()
     upstream["hypothesis_engine"].objective = timings.wrap(upstream["hypothesis_engine"].objective, "fit")
-    database = combined_file(run_dir, "programs_db.csv")
-    if database is None:
-        raise SystemExit(f"No combined programs_db.csv under {run_dir}; has the run finished?")
+    frame = searched_programs(run_dir)
 
     response, angles, _ = load_dataset(args.dataset, utils.extract_stimulus_related_response)
     x, y, groups, _ = prepare(response, angles, "strict-holdout-v1")
@@ -45,7 +43,6 @@ def rescore(args):
             row = json.loads(line)
             translations[row["numpy_sha256"]] = row["jax_code"]
 
-    frame = pd.read_csv(database).sort_values("train_loss").drop_duplicates("program_code_string")
     candidates: list[dict[str, Any]] = [
         {
             "id": f"seed_{k}",
@@ -62,7 +59,6 @@ def rescore(args):
                 "id": f"{row['iteration_number']}_{row['birth_island']}_{row['batch_index']}",
                 "iteration": int(row["iteration_number"]),
                 "discovery_loss": float(row["train_loss"]),
-                "upstream_eval_loss": float(row["test_loss"]),
                 "model": utils.str_to_func(jax_code, "neuron_model"),
                 "estimator": utils.str_to_func(row["parameter_estimator_code_string"], "parameter_estimator"),
                 "code": row["program_code_string"],
