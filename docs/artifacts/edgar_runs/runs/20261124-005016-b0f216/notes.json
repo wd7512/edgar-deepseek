@@ -9,5 +9,59 @@
   "<strong>Peakiness is measured on the sharper side.</strong> Each peak has a left and a right exponent; the figures use the lower of the two, which sets the shape of the tip. That makes this winner look peakier than the others: median min(p₁, p₂) 0.66 over all 2,110 reliable neurons, with 30% of locked-test neurons at the floor of 0.5.",
   "<strong>α does not match the paper's numbers.</strong> The winner gives α ≈ 3.5 (log fit), between the paper's equation refitted here (3.4) and the double Gaussian (4.4). See the 12-generation run's caveat on why the paper's own values are not reproduced.",
   "<strong>Different fitter.</strong> Candidates are fitted with bounded Levenberg–Marquardt instead of upstream's Adam; scores agree to within about 0.7%."
- ]
+ ],
+ "differences": {
+  "same_base": true,
+  "summary": "A baseline plus two asymmetric generalized-Gaussian peaks. The winner gives each side of each peak its own exponent, keeps the second peak within 90° of the opposite direction, and clips the curve at zero.",
+  "rows": [
+   {
+    "part": "baseline",
+    "paper": "b ≥ 0",
+    "winner": "b between 0 and 20",
+    "changed": false
+   },
+   {
+    "part": "peak 1",
+    "paper": "amplitude A₁ ≥ 0 at the preferred direction φ",
+    "winner": "same",
+    "changed": false
+   },
+   {
+    "part": "peak 2",
+    "paper": "amplitude A₂ ≥ 0, centred anywhere: opposite φ, shifted by up to ±180°",
+    "winner": "held within ±90° of the opposite direction",
+    "changed": true
+   },
+   {
+    "part": "widths",
+    "paper": "separate left and right width for each peak (4), each at least 0.01 rad",
+    "winner": "same, each between 0.02 and π rad",
+    "changed": false
+   },
+   {
+    "part": "exponents",
+    "paper": "one exponent per peak (2), between 0.1 and 10",
+    "winner": "one exponent per side of each peak (4), between 0.5 and 6",
+    "changed": true
+   },
+   {
+    "part": "extra terms",
+    "paper": "none",
+    "winner": "none",
+    "changed": false
+   },
+   {
+    "part": "output",
+    "paper": "not clipped",
+    "winner": "clipped at 0",
+    "changed": true
+   },
+   {
+    "part": "parameters",
+    "paper": "11",
+    "winner": "13",
+    "changed": true
+   }
+  ]
+ }
 }

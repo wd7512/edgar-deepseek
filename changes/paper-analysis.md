@@ -18,3 +18,4 @@ Added the population analyses from Tilbury et al. (2025):
 - The results page now shows every run on one page: each run's full report is stacked under the comparison table, in place of the run picker. The page declares UTF-8.
 - The results page has one main table with every statistic for every run (the double Gaussian and the paper's equation once, then each run's winner), in place of a run table plus a summary table per run.
 - The main table has α rows for the 2,110 reliable neurons and for all 20,616 responsive neurons, with plain-language labels explaining what α measures.
+- The results page splits into an overview (main table plus the data, search and rcvPCA validation figures) and one page per run (equation, a table of differences from the paper's equation, the run's charts and caveats). The wave-specific section is removed.

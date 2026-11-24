@@ -10,5 +10,59 @@
   "<strong>α does not match the paper's numbers.</strong> The winner gives α ≈ 3.6 (log fit), between the paper's equation refitted here (3.4) and the double Gaussian (4.4). As for the other run, the paper's own values (4.34 for its equation, 4.26 for the data) are not reproduced on this recording; see that run's caveat.",
   "<strong>Reasoning effort.</strong> DeepSeek V4.1 Flash has no non-thinking mode, so routine calls used effort <code>low</code> where upstream used non-thinking Gemini 2.0 models.",
   "<strong>Different fitter.</strong> Candidates are fitted with bounded Levenberg–Marquardt instead of upstream's Adam; scores agree to within about 0.7%."
- ]
+ ],
+ "differences": {
+  "same_base": true,
+  "summary": "The same equation as the paper's, term for term, with two independent peak centres instead of an offset; that is the same thing written differently. Only the allowed ranges differ.",
+  "rows": [
+   {
+    "part": "baseline",
+    "paper": "b ≥ 0",
+    "winner": "b between 0 and 100",
+    "changed": false
+   },
+   {
+    "part": "peak 1",
+    "paper": "amplitude A₁ ≥ 0 at the preferred direction φ",
+    "winner": "amplitude at most 100",
+    "changed": false
+   },
+   {
+    "part": "peak 2",
+    "paper": "amplitude A₂ ≥ 0, centred anywhere: opposite φ, shifted by up to ±180°",
+    "winner": "its own centre anywhere on the circle, the same freedom written as a second angle",
+    "changed": false
+   },
+   {
+    "part": "widths",
+    "paper": "separate left and right width for each peak (4), each at least 0.01 rad",
+    "winner": "same, each between 0.06 and π rad",
+    "changed": false
+   },
+   {
+    "part": "exponents",
+    "paper": "one exponent per peak (2), between 0.1 and 10",
+    "winner": "one exponent per peak, between 0.5 and 4",
+    "changed": true
+   },
+   {
+    "part": "extra terms",
+    "paper": "none",
+    "winner": "none",
+    "changed": false
+   },
+   {
+    "part": "output",
+    "paper": "not clipped",
+    "winner": "not clipped",
+    "changed": false
+   },
+   {
+    "part": "parameters",
+    "paper": "11",
+    "winner": "11",
+    "changed": false
+   }
+  ]
+ }
 }
