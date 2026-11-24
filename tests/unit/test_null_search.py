@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from edgar_study import null_search, symbolic
+from edgar_study import null_search, report, symbolic
 from edgar_study.upstream import code_key, import_upstream, searched_programs
 
 
@@ -61,6 +61,18 @@ def test_search_writes_a_run_folder_the_rescore_tools_read(tmp_path):
         translations[record["numpy_sha256"]] = record["jax_code"]
     for code in learned["program_code_string"]:
         assert "import jax.numpy as jnp" in translations[code_key(code)]
+
+
+def test_report_counts_fitted_exponents_from_the_trees_not_the_power_helper(tmp_path):
+    run_dir = null_search.run(arguments(tmp_path))
+
+    result = report.report(argparse.Namespace(run=run_dir))
+
+    learned = searched_programs(run_dir)
+    learned = learned[learned["iteration_number"] >= 0]
+    fitted = [code for code in learned["program_code_string"] if symbolic.fitted_exponent(code)]
+    assert result["scored_programs_with_fitted_exponent"] == len(fitted)
+    assert result["scored_programs_with_fitted_exponent"] < len(learned)
 
 
 def test_time_limit_stops_before_the_first_generation(tmp_path):

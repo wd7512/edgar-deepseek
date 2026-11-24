@@ -5,9 +5,11 @@ import json
 import re
 import statistics
 
+from edgar_study import symbolic
 from edgar_study.go_client import list_cost
 from edgar_study.upstream import MSE_SCALE, PENALTY, combined_file
 
+SYMBOLIC = {"gp", "pysr"}
 # A fitted exponent applied to a distance-like term, e.g. `** p`, `np.power(x, shape)`, `** self_p`.
 EXPONENT = re.compile(r"\*\*\s*\(?\s*[A-Za-z_]\w*|np\.power\(\s*[^,]+,\s*[A-Za-z_]\w*")
 
@@ -79,7 +81,8 @@ def report(args):
 
     # Every scored program's NumPy source is in upstream's log, after an "id=generation,island,batch" line.
     scored_code = _scored_programs(run_dir)
-    exponent_generations = sorted(g for g, code in scored_code if EXPONENT.search(code))
+    has_exponent = symbolic.fitted_exponent if manifest.get("method") in SYMBOLIC else EXPONENT.search
+    exponent_generations = sorted(g for g, code in scored_code if has_exponent(code))
     first_exponent_generation = exponent_generations[0] if exponent_generations else None
 
     per_generation = []

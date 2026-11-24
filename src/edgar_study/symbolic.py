@@ -368,7 +368,7 @@ def estimator_source(tree):
 
 
 TOKEN = re.compile(r"\s*(?:(\d+\.?\d*(?:[eE][-+]?\d+)?|\.\d+)|([A-Za-z_]\w*)|(.))")
-FUNCTIONS = {"exp", "cos", "sin", "abs", "square", "wrap", "ifneg", "sqrt", "neg", "cube"}
+FUNCTIONS = {"exp", "cos", "sin", "abs", "square", "wrap", "ifneg", "sqrt", "neg", "cube", "pow", "div"}
 KIND_NAME = re.compile(r"(" + "|".join(KINDS) + r")_\d+$")
 
 
@@ -478,3 +478,22 @@ def from_pysr(text):
     for name in _phases(tree):
         tree = _retag(tree, name, "pref")
     return canonical(tree)
+
+
+def from_source(code):
+    """The tree behind a program written by `to_numpy_source` or `to_jax_source`."""
+    found = re.search(r"return (.*) \+ 0\.0 \* theta", code)
+    if found is None:
+        raise ValueError("not a program written by this module")
+    body = found.group(1)
+    body = re.sub(r"\b_(pow|div|exp|wrap)\(", r"\1(", body)
+    body = re.sub(r"\b(?:np|jnp)\.where\(", "ifneg(", body)
+    body = re.sub(r"\s*<\s*0\s*,", ",", body)
+    body = re.sub(r"\b(?:np|jnp)\.", "", body)
+    return parse(body.replace("**", "^"))
+
+
+def fitted_exponent(code):
+    """Whether a generated program raises something to a fitted power (a parameter in a pow exponent)."""
+    tree = from_source(code)
+    return any(node[0] == "pow" and parameters(node[2]) for _, node in nodes(tree))

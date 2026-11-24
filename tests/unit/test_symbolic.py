@@ -172,3 +172,22 @@ def test_neutral_moves_leave_the_curve_unchanged_at_the_new_parameters_defaults(
         assert np.allclose(child_np(GRID, *args), expected, atol=1e-9), symbolic.to_infix(child)
         changed += child != parent
     assert changed > 20
+
+
+def test_fitted_exponent_is_read_from_generated_programs():
+    fixed = symbolic.SEEDS[1]
+    fitted = symbolic.mutate(np.random.default_rng(0), fixed, steps=1, moves=("promote",))
+
+    assert not symbolic.fitted_exponent(symbolic.to_numpy_source(fixed))
+    assert symbolic.fitted_exponent(symbolic.to_numpy_source(fitted))
+    assert symbolic.fitted_exponent(symbolic.to_jax_source(fitted))
+
+
+def test_from_source_reads_back_every_generated_program():
+    for tree in list(symbolic.SEEDS) + random_trees(30, seed=13):
+        for source in (symbolic.to_numpy_source(tree), symbolic.to_jax_source(tree)):
+            again = symbolic.from_source(source)
+            model_a, _ = compile_pair(tree)
+            model_b, _ = compile_pair(again)
+            values = [symbolic.KINDS[kind].default for _, kind in symbolic.parameters(tree)]
+            assert np.allclose(np.nan_to_num(model_a(GRID, *values)), np.nan_to_num(model_b(GRID, *values)))
