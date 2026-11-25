@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="720" viewBox="0 0 1100 720" role="img" aria-labelledby="title desc">
+  <title id="title">The knowledge frontier</title>
+  <desc id="desc">Two alternative prerequisite bundles lead to a flank-width claim. Every premise within a bundle is required. A separate scheduler chooses a shallow baseline branch over deeper peak and flank branches regardless of whether its first result was negative.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0L8 4L0 8Z" fill="#6b7280"/>
+    </marker>
+  </defs>
+  <rect width="1100" height="720" rx="20" fill="#f4f5f8"/>
+  <g font-family="system-ui, sans-serif" fill="#17233a">
+    <text x="48" y="61" font-size="35" font-weight="750">The knowledge frontier</text>
+    <text x="49" y="93" font-size="18" fill="#526078">Choose an unresolved claim to test, not a score to beat.</text>
+    <rect x="40" y="115" width="1020" height="367" rx="16" fill="white"/>
+    <text x="67" y="151" font-size="17" font-weight="700">01 / HOW A CLAIM EARNS SUPPORT</text>
+    <text x="1032" y="150" text-anchor="end" font-size="13" fill="#526078">Illustrative evidence, not experiment results</text>
+    <g fill="none" stroke="#6b7280" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M353 202H411Q435 202 435 226V230"/>
+      <path d="M353 249H414"/>
+      <path d="M353 296H411Q435 296 435 272V268"/>
+      <path d="M747 223H692Q665 223 665 240"/>
+      <path d="M747 276H692Q665 276 665 259"/>
+      <path d="M452 264L533 330"/>
+      <path d="M648 264L567 330"/>
+      <path d="M550 360V381"/>
+    </g>
+    <g font-size="15">
+      <rect x="67" y="183" width="286" height="38" rx="7" fill="#e8f3ee"/>
+      <text x="80" y="207">Flank residuals recur</text>
+      <rect x="67" y="230" width="286" height="38" rx="7" fill="#e8f3ee"/>
+      <text x="80" y="254">Freeing the center doesn’t fix them</text>
+      <rect x="67" y="277" width="286" height="38" rx="7" fill="#fff0cf" stroke="#d59721"/>
+      <text x="80" y="301">Width split fixes them · untested</text>
+      <rect x="747" y="204" width="286" height="38" rx="7" fill="#eef1f7"/>
+      <text x="760" y="228">Factorial fit isolates width effect</text>
+      <rect x="747" y="257" width="286" height="38" rx="7" fill="#eef1f7"/>
+      <text x="760" y="281">Effect replicates in discovery</text>
+    </g>
+    <g font-size="13" text-anchor="middle" font-weight="750">
+      <circle cx="435" cy="249" r="20" fill="#273d71"/>
+      <text x="435" y="254" fill="white">AND</text>
+      <circle cx="665" cy="249" r="20" fill="#273d71"/>
+      <text x="665" y="254" fill="white">AND</text>
+      <circle cx="550" cy="341" r="19" fill="#273d71"/>
+      <text x="550" y="346" fill="white">OR</text>
+    </g>
+    <rect x="294" y="384" width="512" height="70" rx="12" fill="#e8edff"/>
+    <text x="550" y="412" text-anchor="middle" font-size="19" font-weight="700">Separate flank widths explain a recurring miss</text>
+    <text x="550" y="438" text-anchor="middle" font-size="15" fill="#526078">Unresolved until at least one full route is supported</text>
+    <rect x="40" y="499" width="1020" height="181" rx="16" fill="white"/>
+    <text x="67" y="535" font-size="17" font-weight="700">02 / WHERE HY4 FLASH FREE GOES NEXT</text>
+    <g font-size="16">
+      <rect x="67" y="552" width="300" height="65" rx="8" fill="#eef1f7"/>
+      <text x="82" y="578" font-weight="700">Peak tips</text>
+      <text x="82" y="601" fill="#526078">6 informative contrasts</text>
+      <rect x="400" y="552" width="300" height="65" rx="8" fill="#eef1f7"/>
+      <text x="415" y="578" font-weight="700">Flanks</text>
+      <text x="415" y="601" fill="#526078">2 informative contrasts</text>
+      <rect x="733" y="552" width="300" height="65" rx="8" fill="#fff0cf" stroke="#d59721"/>
+      <text x="748" y="578" font-weight="700">Baseline drift → explore next</text>
+      <text x="748" y="601">1 informative contrast · negative</text>
+    </g>
+    <text x="67" y="651" font-size="16" fill="#526078">Test a different baseline explanation. The negative result counts as evidence, not a reason to stop.</text>
+  </g>
+</svg>
