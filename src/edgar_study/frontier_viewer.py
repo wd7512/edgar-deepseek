@@ -3,6 +3,7 @@
 import json
 import os
 from collections import Counter, defaultdict
+from contextlib import suppress
 from functools import lru_cache
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -234,7 +235,5 @@ def serve(args):
 
     with ThreadingHTTPServer(("127.0.0.1", args.port), Handler) as server:
         print(f"http://127.0.0.1:{server.server_port}/", flush=True)
-        try:
+        with suppress(KeyboardInterrupt):
             server.serve_forever()
-        except KeyboardInterrupt:
-            pass
