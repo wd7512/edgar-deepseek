@@ -1,0 +1,1 @@
+Pin the frontier runner's behaviour with tests through its public entry points (equation grammar, graph validation, draw weights, seeded replay, resume, confirmation, finalize, run guards) ahead of splitting it into a package.
