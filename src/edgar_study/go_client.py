@@ -79,6 +79,8 @@ class Ledger:
 
 
 class GoClient:
+    retry_delay_s = 5.0
+
     def __init__(
         self,
         run_dir,
@@ -197,7 +199,7 @@ class GoClient:
             retry = status is None or status >= 500 or (status == 429 and "quota" not in str(payload).lower())
             if not retry or attempt == 2:
                 return None
-            await asyncio.sleep(5)
+            await asyncio.sleep(self.retry_delay_s)
 
     @contextlib.asynccontextmanager
     async def _slot(self):

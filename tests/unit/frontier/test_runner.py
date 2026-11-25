@@ -134,12 +134,12 @@ def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):
             if len(seen) == 2 and self.interrupt:
                 self.interrupt = False
                 raise InterruptedError
-            seen.append((len(batch.images), prompt))
+            seen.append((batch.count, prompt))
             snapshots.append(json.loads((tmp_path / "wave.json").read_text()))
             return reply(1 if len(seen) == 3 else len(seen))
 
         async def retry(self, batch, prompt, previous_reply, instruction):
-            retry_inputs.append((len(batch.images), prompt, previous_reply, instruction))
+            retry_inputs.append((batch.count, prompt, previous_reply, instruction))
             return reply(3)
 
     stub = Stub()

@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import cached_property, partial
 from io import BytesIO
 
 import jax
@@ -27,9 +28,22 @@ class ParentFit:
 
 @dataclass(frozen=True)
 class FrontierImages:
+    """The sampled neurons and their image panels, each either PNG bytes or a call that draws them.
+
+    Panels are drawn on first use of `images`, so a batch that is never sent costs no drawing.
+    """
+
     cells: tuple[int, ...]
     parent_ids: tuple[str, ...]
-    images: tuple[bytes, ...]
+    panels: tuple[bytes | Callable[[], bytes], ...]
+
+    @property
+    def count(self) -> int:
+        return len(self.panels)
+
+    @cached_property
+    def images(self) -> tuple[bytes, ...]:
+        return tuple(panel if isinstance(panel, bytes) else panel() for panel in self.panels)
 
     async def submit(
         self,
@@ -126,6 +140,6 @@ def prepare_images(
         if not np.isfinite(curves).all() or not np.isfinite(residuals).all():
             raise ValueError(f"Nonfinite predictions for reference {parent.node_id!r}.")
         for i in range(NEURONS):
-            images.append(_plot(i + 1, degrees[i], observed[i], grid_deg, curves[i], residual=False))
-            images.append(_plot(i + 1, degrees[i], residuals[i], grid_deg, curves[i], residual=True))
+            images.append(partial(_plot, i + 1, degrees[i], observed[i], grid_deg, curves[i], residual=False))
+            images.append(partial(_plot, i + 1, degrees[i], residuals[i], grid_deg, curves[i], residual=True))
     return FrontierImages(tuple(map(int, chosen)), tuple(p.node_id for p in parents), tuple(images))

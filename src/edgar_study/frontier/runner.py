@@ -300,7 +300,7 @@ async def execute(
 
         try:
             batch = prepare_images(up, *explore, seed=event["image_seed"], parents=fitted, max_iter=max_iter)
-            event.update(cells=list(batch.cells), images=len(batch.images))
+            event.update(cells=list(batch.cells), images=batch.count)
             event["reply"] = await proposer.submit(batch, prompt)
             proposals = decode_probe(event["reply"], event, step)
         except InvalidReply as exc:

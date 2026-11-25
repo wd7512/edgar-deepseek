@@ -53,6 +53,7 @@ async def check_client(directory):
     os.environ["OPENCODE_API_KEY"] = "test-key"
     ledger = Ledger(directory / "spend.jsonl", cap=1.0)
     go = GoClient(directory, ledger, session_id="test", free_models=["hy4-flash-free"])
+    go.retry_delay_s = 0
     replies = [
         ok("```python\ndef neuron_model(theta): return theta\n```"),
         (500, {"error": "boom"}),

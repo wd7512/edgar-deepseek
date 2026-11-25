@@ -278,6 +278,8 @@ def fit_lm_bounded(
     `max_iterations`. Returns the fitted parameters, the iterations run and how many cells stopped
     (by tolerance or saturated damping) before the iteration cap.
     """
+    if max_iterations < 1:
+        return BoundedFit(np.asarray(params), 0, 0)
     (params, x, y), _, n_cells = _shard(params, x, y)
     cost, lm_step = _least_squares(model, x, y)
 

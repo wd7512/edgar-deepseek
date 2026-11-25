@@ -206,3 +206,10 @@ def test_the_relative_cap_leaves_small_parameters_with_the_same_step_cap_as_befo
     relative = fitting.fit_lm_bounded(_cosine, start, theta, y, max_iterations=1, relative_step=True).params
     assert np.all(np.abs(base - start) <= 0.25 + 1e-6)
     assert np.all(np.abs(relative - start) <= 0.25 * 1.1 + 1e-6)
+
+
+def test_with_no_iterations_allowed_the_starts_come_back_unchanged():
+    theta, y, start = _cosine_cells()
+    fit = fitting.fit_lm_bounded(_cosine, start, theta, y, max_iterations=0)
+    np.testing.assert_array_equal(fit.params, start)
+    assert (fit.iterations, fit.stopped) == (0, 0)
