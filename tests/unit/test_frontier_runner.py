@@ -33,6 +33,41 @@ def test_equation_grammar_rejects_code_and_deduplicates_parameter_renames():
         compile_equation({"equation": "__import__('os').system('false')", "initial": {}})
 
 
+def test_equation_grammar_accepts_periodic_cutoffs_and_width_drift():
+    window = compile_equation(
+        {
+            "equation": "b + a*(0.5+0.5*cos(wrap(theta-m)))*(abs(wrap(theta-m))<w)",
+            "initial": {"b": 1, "a": 2, "m": 0, "w": 1},
+        }
+    )
+    angles = np.array([0, np.pi, 2 * np.pi])
+    np.testing.assert_allclose(window.model(angles, *window.estimator(None, None)), [3, 1, 3])
+    combination = compile_equation(
+        {
+            "equation": BASE.replace("b + ", "b + r*cos(theta - phi) + ", 1).replace(
+                "(wrap(theta-m)/s)**2", "(wrap(theta-m)/(s*(1 + k*tanh(wrap(theta-m)/w))))**2"
+            ),
+            "initial": {"b": 1, "m": 0, "a1": 2, "a2": 1, "s": 0.5, "r": 0, "phi": 0, "k": 0, "w": 1},
+        }
+    )
+    np.testing.assert_allclose(combination.model(angles, *combination.estimator(None, None)), [3, 2, 3])
+
+
+@pytest.mark.parametrize(
+    ("expression", "reason"),
+    [
+        ("a*cos(theta) + 1/0", "nonfinite_expression"),
+        ("a*cos(theta)*(-1)**0.5", "nonreal_expression"),
+        ("a*theta", "nonperiodic_expression"),
+        ("a*cos(theta)+(0<theta<1)", "unsupported_operator"),
+        ("a*cos(theta)" + "+1" * 85, "equation_too_complex"),
+    ],
+)
+def test_invalid_equation_has_stable_reason(expression, reason):
+    with pytest.raises(ValueError, check=lambda exc: getattr(exc, "code", None) == reason):
+        compile_equation({"equation": expression, "initial": {"a": 1}})
+
+
 def test_free_offset_starts_at_the_fitted_baseline_and_improves_on_true_offsets():
     up = import_upstream(Path(__file__).resolve().parents[2])
     up["hypothesis_engine"] = SimpleNamespace(
@@ -74,7 +109,8 @@ def test_free_offset_accepts_roundoff_at_the_minimum_baseline_width():
     assert offset["training_mse"] < 1e-7
 
 
-def test_frontier_warm_starts_nested_gaussian_families_without_selecting_on_held_out(tmp_path):
+@pytest.mark.parametrize("mechanism", ["shape", "offset"])
+def test_frontier_warm_starts_nested_gaussian_families_without_selecting_on_held_out(tmp_path, mechanism):
     up = import_upstream(Path(__file__).resolve().parents[2])
     angles = np.tile(np.linspace(0, 2 * np.pi, 72, endpoint=False, dtype=np.float32), (10, 1))
     base = _baseline(up)
@@ -100,7 +136,23 @@ def test_frontier_warm_starts_nested_gaussian_families_without_selecting_on_held
             " + A3*exp(-0.5*(wrap(theta-p2)/s3)**2)",
             "initial": {"b": 6, "A1": 1, "A2": 1, "A3": 1, "mu": 3, "p2": 2, "s1": 1, "s2": 2, "s3": 1},
         },
+        {
+            "equation": BASE.replace("b + ", "b + c*cos(theta) + ", 1),
+            "initial": {**initial, "c": 0},
+        },
+        {
+            "equation": BASE.replace("b + ", "b + c*sin(theta) + ", 1),
+            "initial": {**initial, "c": 0},
+        },
     ]
+    if mechanism == "offset":
+        proposals = [
+            {
+                "equation": BASE.replace("m-pi", "m-pi-k*sin(q)"),
+                "initial": {**initial, "k": 2, "q": 1},
+                "nesting": {"double_gaussian": {**{name: name for name in initial}, "k": 1, "q": 0}},
+            }
+        ]
 
     class Stub:
         async def submit(self, batch, prompt):
@@ -113,20 +165,21 @@ def test_frontier_warm_starts_nested_gaussian_families_without_selecting_on_held
             (angles, responses),
             (angles, responses),
             tmp_path,
-            ideas=(Idea("changes", "peak", "shape", "Modify the double Gaussian."),),
+            ideas=(Idea("changes", "peak", mechanism, "Modify the double Gaussian."),),
             batches=1,
-            k=3,
+            k=len(proposals),
             max_iter=40,
         )
     )
     fitted = [row["metrics"] for row in result["episodes"][0]["candidates"]]
-    assert [row["parameters"] for row in fitted] == [7, 6, 9]
+    assert [row["parameters"] for row in fitted] == ([7] if mechanism == "offset" else [7, 6, 9, 6, 6])
     baseline = result["baseline_exploration"]["training_mse"]
     for row in [*fitted, result["confirmation"][0]["metrics"]]:
         assert row["initialization"] == "fitted_double_gaussian"
         assert row["training_mse"] <= baseline + 1e-6
-    assert fitted[0]["training_mse"] < 1e-6
-    assert fitted[0]["mse"] > 0.05
+    if mechanism == "shape":
+        assert fitted[0]["training_mse"] < 1e-6
+        assert fitted[0]["mse"] > 0.05
 
 
 def test_combination_keeps_verified_parent_fit_and_ignores_false_mapping(tmp_path):
@@ -155,7 +208,7 @@ def test_combination_keeps_verified_parent_fit_and_ignores_false_mapping(tmp_pat
         async def submit(self, batch, prompt):
             if prompt.startswith("Combine"):
                 return json.dumps([extension, false_extension])
-            return json.dumps([parent, {"equation": "b", "initial": {"b": 1}}])
+            return json.dumps([parent, {"equation": "b + a*cos(3*theta)", "initial": parent["initial"]}])
 
     result = asyncio.run(
         execute(
@@ -193,6 +246,74 @@ def test_draw_requires_a_complete_route_but_allows_alternatives():
     eligible = draw(ideas, {"b": object()}, {}, np.random.default_rng(8))
     c = next(row for row in eligible["eligible"] if row["node"] == "c")
     assert c["parents"] == ["b"]
+
+
+def test_invalid_and_exact_duplicate_proposals_share_one_score_blind_retry(tmp_path):
+    up = import_upstream(Path(__file__).resolve().parents[2])
+    base = _baseline(up)
+    angles = np.tile(np.linspace(0, 2 * np.pi, 48, endpoint=False, dtype=np.float32), (10, 1))
+    responses = 1 + 0.4 * np.cos(angles)
+
+    def objective(model, estimator, loss, x, y, **kwargs):
+        start = (0.7, 0.2, 2.5, 1.1, 0.6) if model is base.model else estimator(x[0], y[0])
+        return None, None, float("inf") if start[0] == 7 else 1.0, np.tile(start, (len(x), 1))
+
+    up["hypothesis_engine"] = SimpleNamespace(objective=objective)
+    invalid = {"equation": "a*log(theta)", "initial": {"a": 1}}
+    reply = json.dumps(
+        [
+            {"equation": "b + a*cos(theta)", "initial": {"b": 1, "a": 1}},
+            {"equation": BASE, "initial": {"m": 0, "s": 1, "a1": 1, "b": 1, "a2": 1}},
+            invalid,
+            {"equation": "a*cos(theta) + b", "initial": {"a": 1, "b": 1}},
+            {"equation": "b + a*sin(theta)", "initial": {"b": 7, "a": 1}},
+        ]
+    )
+
+    class Stub:
+        first = None
+
+        async def submit(self, batch, prompt):
+            self.first = (batch, prompt, reply)
+            return reply
+
+        async def retry(self, batch, prompt, previous_reply, instruction):
+            assert self.first == (batch, prompt, previous_reply)
+            return json.dumps([invalid, {"equation": "b + a*cos(2*theta)", "initial": {"b": 1, "a": 1}}])
+
+    result = asyncio.run(
+        execute(
+            up,
+            Stub(),
+            (angles, responses),
+            (angles, responses),
+            tmp_path,
+            ideas=(Idea("a", "peak", "harmonic", "Try a harmonic."),),
+            batches=1,
+            k=5,
+        )
+    )
+    event = result["episodes"][0]
+    instruction = event["retry"]["instruction"]
+    assert BASE in instruction
+    assert "unsupported_operator" in instruction
+    assert "proposal 3" in instruction.lower()
+    assert "exactly 2 replacements" in instruction
+    assert all(word not in instruction.lower() for word in ("score", "mse", "nonfinite fit"))
+    assert [row["status"] for row in event["candidates"]] == [
+        "fitted",
+        "duplicate",
+        "invalid",
+        "duplicate",
+        "fit_failed",
+        "invalid",
+        "fitted",
+    ]
+    assert [row["reason_code"] for row in event["candidates"] if row["status"] == "invalid"] == [
+        "unsupported_operator",
+        "unsupported_operator",
+    ]
+    assert [row["replaces"] for row in event["candidates"] if row.get("source") == "retry"] == [2, 3]
 
 
 def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):

@@ -33,6 +33,7 @@ OPS = {
     ast.Mult: operator.mul,
     ast.Div: operator.truediv,
     ast.Pow: operator.pow,
+    ast.Lt: lambda left, right: jnp.where(jnp.less(left, right), 1.0, 0.0),
 }
 FUNCTIONS = {name: getattr(jnp, name) for name in ("sin", "cos", "exp", "tanh", "abs", "sqrt")}
 FUNCTIONS["wrap"] = lambda x: jnp.arctan2(jnp.sin(x), jnp.cos(x))
@@ -138,28 +139,43 @@ class Equation:
     nesting: object
 
 
+class InvalidEquation(ValueError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
 def compile_equation(proposal):
     """Compile a small numeric expression tree without executing generated Python."""
+    if not isinstance(proposal, dict):
+        raise InvalidEquation("invalid_equation_object", "Expected an equation object.")
+    text, initial = proposal.get("equation"), proposal.get("initial")
+    if not isinstance(text, str) or not isinstance(initial, dict):
+        raise InvalidEquation(
+            "invalid_equation_object", "Expected an equation string and a parameter object."
+        )
+    if len(text) > 600:
+        raise InvalidEquation("equation_too_complex", "Equation exceeds 600 characters.")
+    if not 1 <= len(initial) <= 12:
+        raise InvalidEquation("invalid_parameter_count", "Expected one to twelve free parameters.")
+    for name, value in initial.items():
+        if (
+            not isinstance(name, str)
+            or not name.isidentifier()
+            or not name.isascii()
+            or name in {"pi", "theta", *FUNCTIONS}
+            or type(value) not in (float, int)
+            or not -100 <= value <= 100
+        ):
+            raise InvalidEquation("invalid_parameter", "Invalid parameter name or initial value.")
     try:
-        text, initial = proposal["equation"], proposal["initial"]
-        if not isinstance(text, str) or len(text) > 600 or not isinstance(initial, dict):
-            raise ValueError("Expected a short equation and a parameter object.")
-        if not 1 <= len(initial) <= 12:
-            raise ValueError("Expected one to twelve free parameters.")
-        for name, value in initial.items():
-            if (
-                not name.isidentifier()
-                or not name.isascii()
-                or name in {"pi", "theta", *FUNCTIONS}
-                or type(value) not in (float, int)
-                or not -100 <= value <= 100
-            ):
-                raise ValueError("Invalid parameter name or initial value.")
         expr = ast.parse(text, mode="eval").body
-    except (KeyError, TypeError, SyntaxError, RecursionError) as exc:
-        raise ValueError("Invalid equation object.") from exc
-    if sum(1 for _ in ast.walk(expr)) > 100:
-        raise ValueError("Equation is too large.")
+    except SyntaxError as exc:
+        raise InvalidEquation("invalid_syntax", "Equation is not a valid expression.") from exc
+    except RecursionError as exc:
+        raise InvalidEquation("equation_too_complex", "Equation is nested too deeply.") from exc
+    if sum(1 for _ in ast.walk(expr)) > 180:
+        raise InvalidEquation("equation_too_complex", "Equation exceeds the expression complexity limit.")
     used = set()
 
     def build(node):
@@ -170,6 +186,8 @@ def compile_equation(proposal):
             return ("name", node.id)
         if isinstance(node, ast.BinOp) and type(node.op) in OPS:
             return (type(node.op), build(node.left), build(node.right))
+        if isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], ast.Lt):
+            return (ast.Lt, build(node.left), build(node.comparators[0]))
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
             return ("neg", build(node.operand)) if isinstance(node.op, ast.USub) else build(node.operand)
         if (
@@ -180,11 +198,13 @@ def compile_equation(proposal):
             and not node.keywords
         ):
             return ("call", node.func.id, build(node.args[0]))
-        raise ValueError("Expression uses an unsupported operation.")
+        raise InvalidEquation("unsupported_operator", "Expression uses an unsupported operation or name.")
 
     tree = build(expr)
     if set(initial) != used - {"pi", "theta"} or "theta" not in used:
-        raise ValueError("Equation must use theta and exactly the listed parameters.")
+        raise InvalidEquation(
+            "parameter_mismatch", "Equation must use theta and exactly the listed parameters."
+        )
 
     def shape(tree):
         op, *parts = tree
@@ -236,9 +256,22 @@ def compile_equation(proposal):
     grid = jnp.linspace(-2.9, 2.9, 37)
     values = jnp.asarray(estimator(None, None), dtype=float)
     for params in (values, values + 0.071):
-        a, b = np.asarray(model(grid, *params)), np.asarray(model(grid + 2 * jnp.pi, *params))
-        if not np.isfinite(a).all() or not np.allclose(a, b, atol=2e-4, rtol=2e-4):
-            raise ValueError("Equation failed the finite periodicity probe.")
+        try:
+            a, b = np.asarray(model(grid, *params)), np.asarray(model(grid + 2 * jnp.pi, *params))
+        except ArithmeticError as exc:
+            raise InvalidEquation("nonfinite_expression", "Equation has undefined arithmetic.") from exc
+        except (TypeError, ValueError) as exc:
+            raise InvalidEquation(
+                "invalid_numeric_expression", "Equation has an invalid numeric operation."
+            ) from exc
+        if np.iscomplexobj(a) or np.iscomplexobj(b):
+            raise InvalidEquation("nonreal_expression", "Equation must produce real-valued responses.")
+        if not np.isfinite(a).all() or not np.isfinite(b).all():
+            raise InvalidEquation(
+                "nonfinite_expression", "Equation produces nonfinite values at trial parameters."
+            )
+        if not np.allclose(a, b, atol=2e-4, rtol=2e-4):
+            raise InvalidEquation("nonperiodic_expression", "Equation failed the 2*pi periodicity probe.")
     key = repr(canonical(tree))
     return Equation(text, dict(initial), key, model, estimator, tuple(seen), proposal.get("nesting"))
 
@@ -366,7 +399,8 @@ def _prompt(idea, parents, definitions, references, k):
     return (
         brief + "\nDo not add an unrelated mechanism. Respect the stated fixed parts. "
         "Use theta in radians, periodic with period 2*pi. Use + - * / ** and "
-        "sin, cos, exp, tanh, abs, sqrt or wrap. Return only a JSON array of objects with "
+        "sin, cos, exp, tanh, abs, sqrt or wrap. A single comparison (x < limit) gives a numeric 0/1 cutoff."
+        " Keep expressions short. Return only a JSON array of objects with "
         "'equation' (expression), 'initial' (parameter names mapped to numeric starting values), "
         "and 'parameters' (free parameter definitions). If a simpler equation is an exact special case,"
         " optionally include 'nesting': an object keyed by the parent idea ID (or 'double_gaussian' for the base)."
@@ -408,6 +442,8 @@ def _baseline_templates():
     ):
         templates.append((BASE.replace("(wrap(theta-m)/s)**2", power), {**shared, "p": neutral}))
     for term, extra in (
+        ("c*cos(theta)", {"c": 0}),
+        ("c*sin(theta)", {"c": 0}),
         ("cc*cos(theta) + ss*sin(theta)", {"cc": 0, "ss": 0}),
         ("ss*sin(theta) + cc*cos(theta)", {"cc": 0, "ss": 0}),
         ("c*cos(theta-phi)", {"c": 0, "phi": 0}),
@@ -651,7 +687,7 @@ async def execute(
     wave: dict[str, Any] = {
         "version": 3,
         "seed": seed,
-        "fit_protocol": "nested_parent_v1",
+        "fit_protocol": "nested_parent_v2",
         "idea_catalog": [asdict(i) for i in ideas],
         "graph": [baseline_node()],
         "planned_batches": batches * waves,
@@ -707,9 +743,6 @@ async def execute(
         return ParentFit(node, candidate.model, candidate.estimator, solve)
 
     def fit_strategy(node, equation, parents):
-        if nodes[node].mechanism == "offset" and not nodes[node].routes:
-            start = _offset_embedding(equation, baseline_fit.model)
-            return partial(_fit_offset, up, equation, embedding=start), "fitted_double_gaussian"
         mappings = []
         supplied = equation.nesting if isinstance(equation.nesting, dict) else {}
         template = (
@@ -736,6 +769,9 @@ async def execute(
             if embed is not None:
                 mappings.append((fit, embed))
         if not mappings:
+            if nodes[node].mechanism == "offset" and not nodes[node].routes:
+                start = _offset_embedding(equation, baseline_fit.model)
+                return partial(_fit_offset, up, equation, embedding=start), "fitted_double_gaussian"
             return None, "estimator"
         source = (
             "fitted_parent"
@@ -748,23 +784,23 @@ async def execute(
         solve, source = fit_strategy(node, equation, tuple(lineage[node] if parents is None else parents))
         return _measure(up, equation, cohort, max_iter, solve=solve, initialization=source)
 
-    def evaluate(proposal, event, step, duplicates, *, retry=False):
+    def evaluate(proposal, event, step, *, replaces=None):
         node, parents = event["node"], event["parents"]
         idea = nodes[node]
-        record = {"proposal": proposal, **({"source": "retry"} if retry else {})}
+        record = {"proposal": proposal}
+        if replaces is not None:
+            record.update(source="retry", replaces=replaces)
         event["candidates"].append(record)
         try:
             candidate = compile_equation(proposal)
-        except (ValueError, KeyError, TypeError, FloatingPointError, OverflowError) as exc:
-            record.update(status="invalid", error=str(exc))
-            return
+        except InvalidEquation as exc:
+            record.update(status="invalid", reason_code=exc.code, error=str(exc))
+            return exc.code, str(exc)
         record["equation"] = candidate.text
         text = candidate.text.strip()
         if text in exact or candidate.key in seen:
             record["status"] = "duplicate"
-            if text in exact and not retry:
-                duplicates.append(text)
-            return
+            return ("exact_repeat", json.dumps(text)) if text in exact else None
         seen.add(candidate.key)
         exact.add(text)
         if node not in born:
@@ -780,6 +816,7 @@ async def execute(
                 lineage[node] = parents
         except (ValueError, KeyError, TypeError, FloatingPointError, OverflowError) as exc:
             record.update(status="fit_failed", error=str(exc))
+        return None
 
     for step in range(len(wave["episodes"]), batches * waves):
         choice = draw(ideas, references, attempts, rng, depth)
@@ -816,26 +853,32 @@ async def execute(
         except ValueError as exc:
             event["error"] = str(exc)
             proposals = []
-        duplicates = []
-
-        for proposal in proposals:
-            evaluate(proposal, event, step, duplicates)
-        if duplicates and batch is not None:
-            instruction = (
-                "These equations have already been tested (one entry per repeat): "
-                f"{json.dumps(duplicates)}. Suggest one different equation for each repeat, "
-                f"keeping the same idea. Return only a JSON array of exactly {len(duplicates)} replacements "
-                "in the original format."
+        targets = []
+        for position, proposal in enumerate(proposals, start=1):
+            rejected = evaluate(proposal, event, step)
+            if rejected is not None:
+                reason, detail = rejected
+                targets.append({"position": position, "reason_code": reason, "detail": detail})
+        if targets and batch is not None:
+            reasons = "\n".join(
+                f"- Proposal {target['position']}: {target['reason_code']} — {target['detail']}"
+                for target in targets
             )
-            retry = event["retry"] = {"instruction": instruction}
+            instruction = (
+                f"Replace these proposals from your original reply:\n{reasons}\n"
+                "Suggest one different equation for each listed proposal, keeping the same idea. "
+                f"Return only a JSON array of exactly {len(targets)} replacements in the listed order "
+                "and original format."
+            )
+            retry = event["retry"] = {"instruction": instruction, "targets": targets}
             try:
                 retry["reply"] = await proposer.retry(batch, prompt, event["reply"], instruction)
-                replacements = _decode(retry["reply"], len(duplicates))
+                replacements = _decode(retry["reply"], len(targets))
             except ValueError as exc:
                 retry["error"] = str(exc)
             else:
-                for replacement in replacements:
-                    evaluate(replacement, event, step, duplicates, retry=True)
+                for replacement, target in zip(replacements, targets, strict=True):
+                    evaluate(replacement, event, step, replaces=target["position"])
         log.info("Frontier episode %s: %s (%s images)", step + 1, node, event.get("images"))
         del wave["active_probe"]
         wave["episodes"].append(event)

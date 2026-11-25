@@ -1,0 +1,1 @@
+Warm-start single-harmonic and explicitly nested offset proposals, accept compact cutoff and combination equations, and retry invalid proposals once with deterministic reasons alongside exact repeats.
