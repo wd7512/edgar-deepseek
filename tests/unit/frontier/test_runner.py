@@ -587,7 +587,7 @@ def test_run_rejects_unusable_options_before_touching_the_network(tmp_path, over
 
 def test_the_number_of_starts_is_part_of_the_run_configuration(tmp_path):
     result, _ = explore(tmp_path, batches=1, starts=2)
-    assert result["fit_protocol"] == "warm_multistart_v1"
+    assert result["fit_protocol"] == "warm_multistart_v2"
     assert result["config"]["starts"] == 2
     with pytest.raises(ValueError):
         explore(tmp_path, batches=1, starts=3, resume=True)

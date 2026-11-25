@@ -20,6 +20,7 @@ from edgar_study.upstream import MSE_SCALE, PENALTY
 
 STARTS = 5
 JITTER = fitting.MULTISTART_SCALE
+RELATIVE_STEP = True
 
 
 class Fit(NamedTuple):
@@ -62,9 +63,12 @@ def jittered_starts(start, xt, yt, starts, seed, scale):
 
 
 def fit_training(
-    model, estimator, xt, yt, max_iter, *, starts=STARTS, seed=0, warm=None, relative_step=False
+    model, estimator, xt, yt, max_iter, *, starts=STARTS, seed=0, warm=None, relative_step=RELATIVE_STEP
 ):
     """Fit `model` to training trials only and return each cell's parameters.
+
+    Each step is capped at a quarter of (1 + |parameter|), so large amplitudes can travel as far as the
+    data needs while parameters near zero keep a cap of about 0.25.
 
     Starts are the estimator's start plus seeded jitter. `warm` (cells, parameters), when given, replaces
     the last jittered start, so the other starts are the same ones a cold fit with one fewer start would
