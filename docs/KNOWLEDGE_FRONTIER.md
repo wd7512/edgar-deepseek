@@ -88,7 +88,7 @@ The harness draws **10 distinct exploration neurons uniformly without replacemen
 
 **Image transport:** A live free-only smoke test against OpenCode Go's OpenAI chat endpoint verified 2 and 10 separate PNG attachments at $0 list cost. The client now supports ordered multi-image requests, and an offline test checks the 80-image payload. Live acceptance at 20 or 80 images and interpretation of scientific plots are not yet verified. Build the batch with `frontier_images.prepare_images` using exploration-only arrays and the selected parent models and estimators, then call `batch.submit(go, prompt)`. The scheduler is not yet wired to this entry point.
 
-[Example response charts](knowledge-frontier-inputs/) · [Example residual charts](knowledge-frontier-residuals/).
+[Example response charts](knowledge-frontier-inputs/) · [Example residual charts](knowledge-frontier-residuals/). These checked-in PNGs are for documentation only. The experiment renders its inputs from the wave's sampled discovery neurons and reference equations; it does not read or reuse the example files.
 
 The harness validates outputs, fits all admissible equations in a batch, compares results, and updates the map. Canonicalize expressions to reject exact duplicates and count relabelings or parameter-only tweaks as the same family; prefer coverage of distinct structures when filling a batch. No lane uses fit scores to set draw weights. Save the prompt-template version, resolved text, panel inputs, random seed, candidate sets, effective probabilities, and draws so scheduling and model inputs can be reconstructed.
 
