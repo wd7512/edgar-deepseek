@@ -1,6 +1,7 @@
 """Offline checks for the Go client, ledger, paid-model guard and tier mapping."""
 
 import asyncio
+import base64
 import json
 import os
 import types
@@ -8,6 +9,7 @@ import types
 import httpx
 
 from edgar_study.engine import install
+from edgar_study.frontier_images import FrontierImages
 from edgar_study.go_client import BudgetExhausted, GoClient, Ledger, role
 
 
@@ -103,6 +105,37 @@ async def check_client(directory):
 
 def test_client_ledger_and_tier_mapping(tmp_path):
     asyncio.run(check_client(tmp_path))
+
+
+def test_sends_eighty_images_with_one_prompt_in_order(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENCODE_API_KEY_FILE", raising=False)
+    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
+    bodies = []
+    images = tuple(f"attachment {i}".encode() for i in range(80))
+
+    async def run():
+        go = GoClient(tmp_path, Ledger(tmp_path / "spend.jsonl"), "test", ["hy4-flash-free"])
+        await go.close()
+        go._http = httpx.AsyncClient(
+            base_url="https://example.invalid", transport=fake_transport([ok("equations")], bodies)
+        )
+        try:
+            batch = FrontierImages(tuple(range(10)), ("a", "b", "c", "d"), images)
+            return await batch.submit(go, "Combine the ideas.")
+        finally:
+            await go.close()
+
+    assert asyncio.run(run()) == "equations"
+    content = bodies[0]["messages"][0]["content"]
+    assert bodies[0]["model"] == "hy4-flash-free"
+    assert content[0] == {
+        "type": "text",
+        "text": "Combine the ideas.\nParent image blocks, in order: a, b, c, d."
+        "\nEach neuron has two images: response and fit, then residuals by angle.",
+    }
+    assert [base64.b64decode(p["image_url"]["url"].split(",", 1)[1]) for p in content[1:]] == list(images)
+    row = json.loads((tmp_path / "api_calls.jsonl").read_text())
+    assert row["image_count"] == 80 and row["image"] is True
 
 
 def client(directory, handler, max_concurrency=16):

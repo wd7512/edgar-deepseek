@@ -1,0 +1,112 @@
+"""Prepare score-free response and residual images for a frontier prompt."""
+
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from io import BytesIO
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+from matplotlib.figure import Figure
+
+from edgar_study.datasets import TRIAL_SEED
+from edgar_study.go_client import GoClient
+from edgar_study.upstream import score_program
+
+NEURONS = 10
+IMAGES_PER_NEURON = 2
+
+
+@dataclass(frozen=True)
+class ParentFit:
+    node_id: str
+    model: Callable
+    estimator: Callable
+
+
+@dataclass(frozen=True)
+class FrontierImages:
+    cells: tuple[int, ...]
+    parent_ids: tuple[str, ...]
+    images: tuple[bytes, ...]
+
+    async def submit(self, client: GoClient, prompt: str) -> str | None:
+        """Submit the prompt and all parent/neuron image pairs to HY4 Flash Free."""
+        if len(self.parent_ids) > 1:
+            prompt += "\nParent image blocks, in order: " + ", ".join(self.parent_ids) + "."
+        prompt += "\nEach neuron has two images: response and fit, then residuals by angle."
+        return await client.chat("hy4-flash-free", prompt, images=self.images)
+
+
+def _plot(cell, degrees, values, grid, curve, *, residual):
+    figure = Figure(figsize=(6, 3.55), layout="constrained")
+    axis = figure.subplots()
+    title = "Residual by angle" if residual else "Discovery response"
+    axis.set_title(f"Neuron {cell:02d} · {title}", loc="left", weight="bold")
+    axis.scatter(degrees, values, s=12, color="#637b9b", alpha=0.32, linewidths=0, label="Held-out trials")
+    bins = np.floor(degrees / 30).astype(int)
+    active = np.unique(bins)
+    axis.scatter(
+        active * 30 + 15,
+        [values[bins == i].mean() for i in active],
+        s=20,
+        color="#273d71",
+        marker="D",
+        label="30° bin mean",
+        zorder=4,
+    )
+    if residual:
+        axis.axhline(0, color="#007d79", linewidth=1.8, label="Fit")
+    else:
+        axis.plot(grid, curve, color="#007d79", linewidth=2.4, label="Fit")
+    axis.set(
+        xlim=(0, 360),
+        xticks=[0, 90, 180, 270, 360],
+        xlabel="Stimulus angle (°)",
+        ylabel="Residual (observed − fitted)" if residual else "Normalized response",
+    )
+    axis.grid(axis="y", alpha=0.22)
+    axis.spines[["top", "right"]].set_visible(False)
+    axis.legend(loc="best", frameon=False, fontsize=8)
+    buffer = BytesIO()
+    figure.savefig(buffer, format="png", dpi=115, metadata={"Title": title})
+    return buffer.getvalue()
+
+
+def prepare_images(
+    upstream,
+    angles,
+    responses,
+    *,
+    seed: int,
+    parents: Sequence[ParentFit] = (),
+    max_iter: int = 2000,
+) -> FrontierImages:
+    """Fit each parent on the same ten exploration-only rows and render held-out trials."""
+    x, y = jnp.asarray(angles), jnp.asarray(responses)
+    if x.ndim != 2 or x.shape != y.shape or x.shape[0] < NEURONS or x.shape[1] < 2:
+        raise ValueError("Expected matching arrays with at least ten exploration neurons and two trials.")
+    chosen = np.random.default_rng(seed).choice(x.shape[0], size=NEURONS, replace=False)
+    x, y = x[chosen], y[chosen]
+    held = jax.random.permutation(jax.random.PRNGKey(TRIAL_SEED), jnp.arange(x.shape[1]))[x.shape[1] // 2 :]
+    grid = jnp.linspace(0, 2 * jnp.pi, 361)
+    grid_deg, degrees = np.linspace(0, 360, 361), np.rad2deg(np.asarray(x[:, held])) % 360
+    observed = np.asarray(y[:, held])
+    references = tuple(parents)
+    if not references:
+        seeds = upstream["seed_programs"]
+        references = (ParentFit("root", seeds.neuron_model_2_jax, seeds.parameter_estimator_2),)
+    images = []
+    for parent in references:
+        score, _, _, params = score_program(upstream, parent.model, parent.estimator, x, y, max_iter)
+        if not np.isfinite(score):
+            raise ValueError(f"Could not fit reference {parent.node_id!r}.")
+        predict = jax.vmap(lambda row, p, model=parent.model: jnp.broadcast_to(model(row, *p), row.shape))
+        curves = np.asarray(predict(jnp.broadcast_to(grid, (NEURONS, grid.size)), params))
+        residuals = observed - np.asarray(predict(x[:, held], params))
+        if not np.isfinite(curves).all() or not np.isfinite(residuals).all():
+            raise ValueError(f"Nonfinite predictions for reference {parent.node_id!r}.")
+        for i in range(NEURONS):
+            images.append(_plot(i + 1, degrees[i], observed[i], grid_deg, curves[i], residual=False))
+            images.append(_plot(i + 1, degrees[i], residuals[i], grid_deg, curves[i], residual=True))
+    return FrontierImages(tuple(map(int, chosen)), tuple(p.node_id for p in parents), tuple(images))
