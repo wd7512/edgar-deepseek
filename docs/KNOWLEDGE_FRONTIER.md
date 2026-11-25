@@ -118,3 +118,11 @@ This runs six batches of four proposals with the free model only. Use `--waves N
 `manifest.json` records the partition and seed; `wave.json` records eligible draws, probabilities, prompts, sampled rows, proposals, and all fit outcomes. The first distinct equation that yields a finite fit at a node becomes its exploratory reference; having a reference can unlock a continuation but is not confirmation. The frozen shortlist is checked on untouched discovery neurons against the double Gaussian and every parent used in the selected route. “Supported fit” means the predeclared fit check passed, not that a biological mechanism has been established. Frozen hypotheses or confirmation data from repeated runs are not independent.
 
 By default, selection and locked-test cells are unused. Use `--finalize` only for the final predeclared run: pick among supported equations and the baseline on selection cells by penalized score, then evaluate the chosen equation and the baseline once on locked cells. Do not use locked-test results to tune a later wave. Runs do not resume from an existing audit directory.
+
+## Watching the graph locally
+
+```sh
+uv run edgar frontier-view --run results/frontier/wave-1
+```
+
+Open [localhost:8765](http://127.0.0.1:8765/). The read-only server follows the selected `wave.json` every two seconds and waits if no batch has been written. Use the timeline to replay a prefix, then **Live / latest** to resume following. Outlines distinguish attempted, fitted, confirmed, and blocked ideas; alternative prerequisite bundles stay separate. The graph layout is predefined by the run: fits unlock existing routes rather than adding new nodes.

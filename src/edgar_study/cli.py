@@ -217,6 +217,11 @@ def main():
     frontier.add_argument("--finalize", action="store_true", help="Use selection and locked-test cells once.")
     frontier.set_defaults(func=lambda args: _load("frontier_runner", "run")(args))
 
+    viewer = commands.add_parser("frontier-view", help="Serve a live frontier graph and batch replay.")
+    viewer.add_argument("--run", type=Path, required=True, help="Run directory or wave.json.")
+    viewer.add_argument("--port", type=int, default=8765)
+    viewer.set_defaults(func=lambda args: _load("frontier_viewer", "serve")(args))
+
     rescore = commands.add_parser(
         "rescore",
         parents=[dataset, upstream, fitter],
