@@ -27,6 +27,8 @@ def test_replay_distinguishes_an_unlocked_route_from_a_confirmed_claim():
     assert "a &lt; b" in latest
     assert 'data-live="true"' in latest
     assert 'data-live="false"' in earlier
+    assert '<details class="panel"><summary>Idea details</summary>' in latest
+    assert 'preserveAspectRatio="xMinYMid meet"' in latest
 
 
 def test_missing_snapshot_is_a_live_waiting_page():

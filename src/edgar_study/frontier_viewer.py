@@ -19,20 +19,21 @@ COLORS = {
 
 STYLE = """
 :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#101721;color:#edf4fc;
-font:15px system-ui,sans-serif}main{max-width:1350px;margin:auto;padding:32px clamp(16px,4vw,56px)}
-h1{font-size:clamp(26px,4vw,44px);letter-spacing:-.04em;margin:4px 0}h2{font-size:19px;margin:0}
-p,small{color:#acbfd0}.eyebrow{color:#80e8cd;letter-spacing:.15em;font-weight:700;font-size:12px}
-.bar,.legend{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:16px 0}
-a,.pill{border:1px solid #41546a;border-radius:999px;color:#b7ecff;padding:5px 11px;text-decoration:none}
-a.active{border-color:#59d8c6}.panel{background:#182331;border:1px solid #344759;
-border-radius:14px;padding:16px;margin:16px 0}.scroll{overflow:auto}.graph{display:block;min-width:620px;width:100%}
+font:13px system-ui,sans-serif}main{max-width:1050px;margin:auto;padding:12px 20px}
+h1{font-size:19px;margin:0}h3{font-size:13px}p,small{color:#acbfd0}
+.bar,.legend{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:7px 0}
+a,.pill{color:#b7ecff;padding:2px 4px;text-decoration:none}a:hover{text-decoration:underline}
+a.active{color:#80e8cd;font-weight:700}.panel{border-top:1px solid #344759;padding:7px 0}
+.panel p{margin:0 0 5px}.scroll{overflow:auto}
+.graph{display:block;width:100%;height:min(var(--graph-h),max(125px,calc(100dvh - 185px)))}
+summary{width:fit-content;cursor:pointer;color:#acbfd0}
 .node rect{fill:#222f40;stroke-width:2}.node.current rect{stroke-width:4}.node text{fill:#edf4fc;font-weight:650}
 .node .sub{fill:#bfd0e1;font-size:11px;font-weight:400}.route path{fill:none;stroke:#526477;stroke-width:1.5}
 .route circle{fill:#263647;stroke:#657686}.route text{fill:#e0e8f2;font-size:9px;text-anchor:middle}
 .route[data-route-state=ready] path,.route[data-route-state=ready] circle{stroke:#6bcabc}
 .key{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--key);margin-right:6px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:14px}
-.card{border:1px solid #344759;border-radius:10px;padding:12px;overflow-wrap:anywhere}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:8px;margin-top:8px}
+.card{border:1px solid #344759;border-radius:4px;padding:8px;overflow-wrap:anywhere}
 .card h3,.card p{margin:0 0 6px}code{color:#c3e9de}input{accent-color:#59d8c6;max-width:150px}
 """
 
@@ -50,9 +51,12 @@ async function refresh() {
       const fresh = doc.querySelector('main');
       if (fresh && fresh.dataset.snapshot !== current.dataset.snapshot) {
         const left = current.querySelector('.scroll')?.scrollLeft || 0;
+        const expanded = current.querySelector('details')?.open;
         current.replaceWith(fresh);
         const scroll = fresh.querySelector('.scroll');
         if (scroll) scroll.scrollLeft = left;
+        const details = fresh.querySelector('details');
+        if (details && expanded) details.open = true;
       }
     }
   } catch {}
@@ -70,10 +74,10 @@ def _graph(nodes, fitted, attempted, confirmed, current):
     columns = defaultdict(list)
     for node in nodes:
         columns[rank(node)].append(node)
-    height = max(map(len, columns.values())) * 80 + 26
-    width = 216 + max(columns) * 270
+    height = max(map(len, columns.values())) * 48 + 12
+    width = 180 + max(columns) * 222
     positions = {
-        node: (12 + level * 270, (height - (len(col) - 1) * 80) / 2 + i * 80)
+        node: (9 + level * 222, (height - (len(col) - 1) * 48) / 2 + i * 48)
         for level, col in columns.items()
         for i, node in enumerate(col)
     }
@@ -84,17 +88,17 @@ def _graph(nodes, fitted, attempted, confirmed, current):
         for i, route in enumerate(routes):
             available = all(p in fitted for p in route)
             ready |= available
-            rx, ry = x - 42, y + 26 * (i - (len(routes) - 1) / 2)
+            rx, ry = x - 32, y + 22 * (i - (len(routes) - 1) / 2)
             label = escape(" + ".join(route) + " → " + node)
             edges.append(
                 f'<g class="route" data-route-state="{"ready" if available else "blocked"}"><title>{label}</title>'
             )
             for parent in route:
                 px, py = positions[parent]
-                mid = (px + 186 + rx) / 2
-                edges.append(f'<path d="M{px + 186},{py} C{mid},{py} {mid},{ry} {rx},{ry}"/>')
+                mid = (px + 162 + rx) / 2
+                edges.append(f'<path d="M{px + 162},{py} C{mid},{py} {mid},{ry} {rx},{ry}"/>')
             edges.append(
-                f'<path d="M{rx},{ry} L{x},{y}"/><circle cx="{rx}" cy="{ry}" r="12"/>'
+                f'<path d="M{rx},{ry} L{x},{y}"/><circle cx="{rx}" cy="{ry}" r="10"/>'
                 f'<text x="{rx}" y="{ry + 3}">{"AND" if len(route) > 1 else "1"}</text></g>'
             )
         state = next(
@@ -113,11 +117,12 @@ def _graph(nodes, fitted, attempted, confirmed, current):
             f'<g class="node{" current" if node == current else ""}" data-node="{escape(node)}" '
             f'data-state="{state}" transform="translate({x},{y})">'
             f"<title>{escape(node)}: {escape(nodes[node]['text'])}</title>"
-            f'<rect width="186" height="58" y="-29" rx="10" stroke="{COLORS[state]}"/>'
-            f'<text x="12" y="-2">{title}</text><text class="sub" x="12" y="16">{state}</text></g>'
+            f'<rect width="162" height="34" y="-17" rx="4" stroke="{COLORS[state]}"/>'
+            f'<text x="8" y="-1" font-size="12">{title}</text><text class="sub" x="8" y="12">{state}</text></g>'
         )
     return (
-        f'<svg class="graph" viewBox="0 0 {width} {height}" role="img" aria-label="Prerequisite graph">'
+        f'<svg class="graph" style="--graph-h:{height}px" viewBox="0 0 {width} {height}" '
+        'preserveAspectRatio="xMinYMid meet" role="img" aria-label="Prerequisite graph">'
         + "".join(edges + cards)
         + "</svg>"
     )
@@ -174,16 +179,17 @@ def render(wave, step=None, *, fragment=False, snapshot=""):
             else "Starting graph, before any batches."
         )
         content = (
-            f'<section class="panel"><h2>Prerequisite graph</h2><p>{focus}</p><div class="legend">{legend}</div>'
+            f'<section class="panel"><p>{focus}</p><div class="legend">{legend}</div>'
             f'<div class="scroll">{_graph(nodes, fitted, attempted, confirmed, current)}</div>'
             "<p><small>AND needs every incoming parent fit. Multiple routes are alternatives. "
             "Ready is not confirmed.</small></p></section>"
-            '<section class="panel"><h2>Ideas</h2><div class="cards">' + "".join(cards) + "</div></section>"
+            '<details class="panel"><summary>Idea details</summary><div class="cards">'
+            + "".join(cards)
+            + "</div></details>"
         )
     main = (
         f'<main data-live="{str(live).lower()}" data-snapshot="{escape(snapshot)}">'
-        '<span class="eyebrow">EDGAR · HY4 Flash Free</span><h1>Knowledge frontier</h1>'
-        "<p>Watch ideas acquire fits and unlock combinations, or replay an earlier batch.</p>"
+        "<h1>Knowledge frontier</h1>"
         f"{bar}</div>{content}</main>"
     )
     if fragment:
