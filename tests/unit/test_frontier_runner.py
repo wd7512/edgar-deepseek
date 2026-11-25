@@ -13,6 +13,7 @@ from edgar_study.frontier_runner import (
     Idea,
     _baseline,
     _measure,
+    _trials,
     compile_equation,
     draw,
     execute,
@@ -71,6 +72,112 @@ def test_free_offset_accepts_roundoff_at_the_minimum_baseline_width():
     responses = np.asarray(_baseline(up).model(angles, *params[0]))
     offset = _measure(up, equation, (angles, responses), 2000, nested_offset=True)
     assert offset["training_mse"] < 1e-7
+
+
+def test_frontier_warm_starts_nested_gaussian_families_without_selecting_on_held_out(tmp_path):
+    up = import_upstream(Path(__file__).resolve().parents[2])
+    angles = np.tile(np.linspace(0, 2 * np.pi, 72, endpoint=False, dtype=np.float32), (10, 1))
+    base = _baseline(up)
+    params = (0.7, 0.2, 2.5, 1.1, 0.6)
+    responses = np.array(base.model(angles, *params))
+    train, _ = _trials(angles)
+    responses[:, train] += 0.4 * np.cos(angles[:, train])
+
+    def objective(model, estimator, loss, x, y, **kwargs):
+        start = params if model is base.model else estimator(None, None)
+        return None, None, 1.0, np.tile(np.array(start, dtype=np.float32), (len(x), 1))
+
+    up["hypothesis_engine"] = SimpleNamespace(objective=objective)
+    initial = {"m": 3, "b": 6, "a1": 0.2, "a2": 0.1, "s": 1}
+    proposals = [
+        {"equation": BASE + " + cc*cos(theta) + ss*sin(theta)", "initial": {**initial, "cc": 0, "ss": 0}},
+        {
+            "equation": BASE.replace("(wrap(theta-m)/s)**2", "(abs(wrap(theta-m))/s)**p"),
+            "initial": {**initial, "p": 1},
+        },
+        {
+            "equation": "b + A1*exp(-0.5*(wrap(theta-mu)/s1)**2) + A2*exp(-0.5*(wrap(theta-mu)/s2)**2)"
+            " + A3*exp(-0.5*(wrap(theta-p2)/s3)**2)",
+            "initial": {"b": 6, "A1": 1, "A2": 1, "A3": 1, "mu": 3, "p2": 2, "s1": 1, "s2": 2, "s3": 1},
+        },
+    ]
+
+    class Stub:
+        async def submit(self, batch, prompt):
+            return json.dumps(proposals)
+
+    result = asyncio.run(
+        execute(
+            up,
+            Stub(),
+            (angles, responses),
+            (angles, responses),
+            tmp_path,
+            ideas=(Idea("changes", "peak", "shape", "Modify the double Gaussian."),),
+            batches=1,
+            k=3,
+            max_iter=40,
+        )
+    )
+    fitted = [row["metrics"] for row in result["episodes"][0]["candidates"]]
+    assert [row["parameters"] for row in fitted] == [7, 6, 9]
+    baseline = result["baseline_exploration"]["training_mse"]
+    for row in [*fitted, result["confirmation"][0]["metrics"]]:
+        assert row["initialization"] == "fitted_double_gaussian"
+        assert row["training_mse"] <= baseline + 1e-6
+    assert fitted[0]["training_mse"] < 1e-6
+    assert fitted[0]["mse"] > 0.05
+
+
+def test_combination_keeps_verified_parent_fit_and_ignores_false_mapping(tmp_path):
+    up = import_upstream(Path(__file__).resolve().parents[2])
+    angles = np.tile(np.linspace(0, 2 * np.pi, 48, endpoint=False, dtype=np.float32), (10, 1))
+    responses = 1 + 0.4 * np.cos(angles)
+
+    def objective(model, estimator, loss, x, y, **kwargs):
+        start = estimator(x[0], y[0])
+        return None, None, 1.0, np.tile(np.array(start, dtype=np.float32), (len(x), 1))
+
+    up["hypothesis_engine"] = SimpleNamespace(objective=objective)
+    parent = {"equation": "b + a*cos(theta)", "initial": {"b": 1, "a": 0.4}}
+    extension = {
+        "equation": "u + v*cos(theta) + w*sin(theta)",
+        "initial": {"u": 4, "v": 2, "w": 1},
+        "nesting": {"a": {"u": "b", "v": "a", "w": 0}},
+    }
+    false_extension = {
+        "equation": "u + v*cos(2*theta) + w*sin(theta)",
+        "initial": extension["initial"],
+        "nesting": extension["nesting"],
+    }
+
+    class Stub:
+        async def submit(self, batch, prompt):
+            if prompt.startswith("Combine"):
+                return json.dumps([extension, false_extension])
+            return json.dumps([parent, {"equation": "b", "initial": {"b": 1}}])
+
+    result = asyncio.run(
+        execute(
+            up,
+            Stub(),
+            (angles, responses),
+            (angles, responses),
+            tmp_path,
+            ideas=(
+                Idea("a", "peak", "harmonic", "One harmonic."),
+                Idea("c", "peak", "add", "Add sine.", (("a",),)),
+            ),
+            batches=2,
+            k=2,
+            max_iter=0,
+        )
+    )
+    verified, unverified = [row["metrics"] for row in result["episodes"][1]["candidates"]]
+    assert verified["initialization"] == "fitted_parent"
+    assert verified["training_mse"] < 1e-7
+    assert unverified["initialization"] == "estimator"
+    assert unverified["training_mse"] > 1
 
 
 def test_draw_requires_a_complete_route_but_allows_alternatives():
