@@ -17,11 +17,11 @@ import numpy as np
 from edgar_study import fitting
 from edgar_study.datasets import TRIAL_SEED, load_dataset, prepare
 from edgar_study.frontier_images import ParentFit, prepare_images
+from edgar_study.frontier_seed import BASE, BASELINE_ID, baseline_node
 from edgar_study.go_client import GoClient, Ledger, fetch_models, is_free, load_key
 from edgar_study.upstream import import_upstream, score_program
 
 MODEL = "hy4-flash-free"
-BASE = "b + a1*exp(-0.5*(wrap(theta-m)/s)**2) + a2*exp(-0.5*(wrap(theta-m-pi)/s)**2)"
 LANES = {"frontier": 0.6, "detour": 0.3, "root": 0.1}
 OPS = {
     ast.Add: operator.add,
@@ -241,6 +241,8 @@ def validate_graph(ideas):
     nodes = {idea.node: idea for idea in ideas}
     if len(nodes) != len(ideas):
         raise ValueError("Duplicate idea IDs.")
+    if BASELINE_ID in nodes:
+        raise ValueError(f"{BASELINE_ID!r} is reserved for the starting equation.")
     active, complete = set(), set()
 
     def visit(node):
@@ -365,7 +367,7 @@ def _prompt(idea, parents, definitions, references, k):
 
 def _baseline(up):
     seeds = up["seed_programs"]
-    return ParentFit("double_gaussian", seeds.neuron_model_2_jax, seeds.parameter_estimator_2)
+    return ParentFit(BASELINE_ID, seeds.neuron_model_2_jax, seeds.parameter_estimator_2)
 
 
 def _measure(up, model, cohort, max_iter):
@@ -444,12 +446,12 @@ async def execute(
     references, metrics, attempts, depth, seen = {}, {}, Counter(), Counter(), set()
     lineage = {}
     rng = np.random.default_rng(seed)
-    birth = {i.node: 0 for i in ideas if i.lane == "root"}
+    born = set()
     wave = {
-        "version": 2,
+        "version": 3,
         "seed": seed,
         "idea_catalog": [asdict(i) for i in ideas],
-        "graph": [{**asdict(nodes[node]), "introduced_at": 0} for node in birth],
+        "graph": [baseline_node()],
         "planned_batches": batches * waves,
         "episodes": [],
         "confirmation": [],
@@ -503,9 +505,10 @@ async def execute(
                 record["status"] = "duplicate"
                 continue
             seen.add(candidate.key)
-            if node not in birth:
-                birth[node] = step + 1
-                wave["graph"].append({**asdict(idea), "introduced_at": step + 1})
+            if node not in born:
+                born.add(node)
+                routes = idea.routes or (() if idea.lane == "root" else ((BASELINE_ID,),))
+                wave["graph"].append({**asdict(idea), "routes": routes, "introduced_at": step + 1})
             try:
                 result = _measure(up, candidate, explore, max_iter)
                 record.update(status="fitted", metrics=result)
@@ -565,7 +568,10 @@ async def execute(
     def supported_claim(node):
         return node in supported and all(supported_claim(parent) for parent in lineage[node])
 
-    wave["claims"] = {node: "supported_fit" if supported_claim(node) else "unresolved" for node in birth}
+    wave["claims"] = {
+        row["node"]: "supported_fit" if supported_claim(row["node"]) else "unresolved"
+        for row in wave["graph"][1:]
+    }
     if final is not None and supported:
         selection, locked = final
         scores = {"double_gaussian": _measure(up, _baseline(up), selection, max_iter)}

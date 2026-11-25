@@ -31,7 +31,40 @@ def test_replay_distinguishes_an_unlocked_route_from_a_confirmed_claim():
 
 
 def test_missing_snapshot_is_a_live_waiting_page():
-    assert "Waiting for the first batch" in render({})
+    view = render({})
+    assert "Waiting for the first batch" in view
+    assert view.count('data-node="') == 1
+    assert 'data-node="double_gaussian" data-state="baseline" data-equations="1"' in view
+    assert "Starting equation" in view
+    assert "b + a1*exp" in view
+    assert 'data-live="true"' in render({}, 0)
+
+
+def test_baseline_route_is_ready_without_counting_the_seed_as_a_probe():
+    root = {
+        "node": "double_gaussian",
+        "text": "Double Gaussian",
+        "routes": [],
+        "equation": "exp(-theta**2)",
+        "introduced_at": 0,
+    }
+    child = {
+        "node": "child",
+        "text": "Shift the second peak.",
+        "routes": [["double_gaussian"]],
+        "introduced_at": 1,
+    }
+    wave = {
+        "version": 3,
+        "graph": [root, child],
+        "idea_catalog": [child],
+        "episodes": [{"node": "child", "candidates": [{"equation": "cos(theta)", "status": "fitted"}]}],
+    }
+    assert 'data-node="child"' not in render(wave, 0)
+    view = render(wave)
+    assert 'data-route-state="ready" data-child="child"' in view
+    assert 'data-parent="double_gaussian"' in view
+    assert "0 probe(s)" in view
 
 
 def test_probe_failure_is_visible_even_without_a_node():

@@ -10,7 +10,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from textwrap import wrap
 from urllib.parse import parse_qs, urlsplit
 
+from edgar_study.frontier_seed import BASELINE_ID, baseline_node
+
 COLORS = {
+    "baseline": "#c3a7f9",
     "blocked": "#657686",
     "ready": "#9ebaf7",
     "attempted": "#ffc977",
@@ -28,13 +31,14 @@ MODES = {
 LAYOUT = {
     "width": (145, 145),
     "drift": (390, 80),
-    "width-drift": (350, 220),
+    "width-drift": (165, 240),
     "tip": (590, 145),
     "offset": (845, 90),
     "peak-pair": (750, 260),
     "harmonic": (190, 350),
     "window": (560, 405),
     "blend": (870, 385),
+    BASELINE_ID: (500, 305),
 }
 
 STYLE = """
@@ -231,7 +235,7 @@ def _graph(nodes, catalog, fitted, attempted, counts, confirmed, current):
         routes = idea["routes"]
         ready = not routes
         for i, route in enumerate(routes):
-            available = all(p in fitted for p in route)
+            available = all(p in fitted or (p == BASELINE_ID and p in nodes) for p in route)
             ready |= available
             if not all(p in nodes for p in route):
                 continue
@@ -252,6 +256,7 @@ def _graph(nodes, catalog, fitted, attempted, counts, confirmed, current):
         state = next(
             name
             for name, enabled in (
+                ("baseline", node == BASELINE_ID and bool(idea.get("equation"))),
                 ("confirmed", node in confirmed),
                 ("fitted", node in fitted),
                 ("attempted", node in attempted),
@@ -303,7 +308,15 @@ def _mode(event):
 
 
 def _inspector(node, idea, probes, reference):
-    cards = []
+    seed = idea.get("equation") if node == BASELINE_ID else None
+    cards = (
+        [
+            '<details class="probe" data-equation-id="seed"><summary>Starting equation</summary>'
+            f"<code>{escape(seed)}</code></details>"
+        ]
+        if seed
+        else []
+    )
     for batch, event in probes:
         equations = []
         invalid = 0
@@ -345,11 +358,12 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
     total = len(wave.get("episodes", []))
     index = total if step is None else min(max(0, step), total)
     episodes = wave.get("episodes", [])[:index]
-    live = step is None
+    live = step is None or not wave
     status = wave.get("status", "waiting")
     final = live and status == "complete"
-    nodes = {idea["node"]: idea for idea in wave.get("graph", []) if idea.get("introduced_at", 0) <= index}
-    catalog = {idea["node"]: idea for idea in wave.get("idea_catalog", wave.get("graph", []))}
+    graph = {idea["node"]: idea for idea in wave.get("graph", [])} if wave else {BASELINE_ID: baseline_node()}
+    nodes = {node: idea for node, idea in graph.items() if idea.get("introduced_at", 0) <= index}
+    catalog = {idea["node"]: idea for idea in wave.get("idea_catalog", [])} | graph
     probes = defaultdict(list)
     for batch, event in enumerate(episodes, 1):
         probes[event["node"]].append((batch, event))
@@ -360,6 +374,8 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
         for candidate in event.get("candidates", [])
         if candidate.get("status") in {"fitted", "fit_failed"} and _equation(candidate)
     )
+    if nodes.get(BASELINE_ID, {}).get("equation"):
+        counts[BASELINE_ID] = 1
     fitted = Counter(
         event["node"]
         for event in episodes
@@ -371,17 +387,19 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
     selected = active or (episodes[-1] if episodes else {})
     current = selected.get("node", "")
     planned = wave.get("planned_batches", total) if live else total
-    bar = f'<div class="bar"><strong>Batch {index} / {planned}</strong>'
+    progress = f"Batch {index} / {planned}" if planned else f"Batch {index}"
+    bar = f'<div class="bar"><strong>{progress}</strong>'
     bar += f'<span class="pill">{escape(status.replace("_", " ")) if live else "replay"}</span>'
-    if catalog:
+    if wave and catalog:
         for target, label in ((0, "Start"), (index - 1, "Previous"), (index + 1, "Next")):
             if 0 <= target <= total and target != index:
                 bar += f'<a href="?step={target}">{label}</a>'
         bar += (
             f'<input id="step" aria-label="Replay batch" type="range" min="0" max="{total}" value="{index}">'
             f'<a class="{"active" if live else ""}" href="/">Live / latest</a>'
-            '<button type="button" data-reset>Reset layout</button>'
         )
+    if nodes:
+        bar += '<button type="button" data-reset>Reset layout</button>'
     legend = "".join(
         f'<span class="pill"><i class="key" style="--key:{color}"></i>{state.title()}</span>'
         for state, color in COLORS.items()

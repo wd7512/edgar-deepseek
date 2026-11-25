@@ -78,11 +78,17 @@ def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):
     assert all("score" not in prompt.lower() for _, prompt in seen)
     assert seen[2][1].startswith("Combine the ideas in this thread:")
     assert "Do not add an unrelated mechanism" in seen[2][1]
-    assert result["version"] == 2
-    assert [row["node"] for row in snapshots[0]["graph"]] == ["a", "b"]
-    assert [row["node"] for row in snapshots[2]["graph"]] == ["a", "b"]
+    assert result["version"] == 3
+    assert [row["node"] for row in snapshots[0]["graph"]] == ["double_gaussian"]
+    assert [row["node"] for row in snapshots[2]["graph"]] == [
+        "double_gaussian",
+        result["episodes"][0]["node"],
+        result["episodes"][1]["node"],
+    ]
+    assert snapshots[0]["graph"][0]["equation"].startswith("b + a1*exp")
     assert snapshots[2]["active_probe"]["mode"] == "combination"
-    assert [row["introduced_at"] for row in result["graph"]] == [0, 0, 3]
+    assert [row["introduced_at"] for row in result["graph"]] == [0, 1, 2, 3]
+    assert [row["routes"] for row in result["graph"]] == [[], [], [], [["a", "b"]]]
     assert "active_probe" not in result
     assert result["episodes"][0]["candidates"][0]["status"] == "fitted"
     assert {row["node"] for row in result["confirmation"]} == {"a", "b", "c"}
