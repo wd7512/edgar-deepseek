@@ -1,0 +1,1 @@
+Pin the frontier runner's behaviour with tests through its public entry points, then split it into the `edgar_study.frontier` package (grammar, ideas, prompts, replies, fits, images, seed, viewer, runner) with one mirrored test module each.

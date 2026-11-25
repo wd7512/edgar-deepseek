@@ -221,12 +221,12 @@ def main():
         "--new-probability", type=float, default=0.8, help="Chance of a new idea vs. a revisit."
     )
     frontier.add_argument("--finalize", action="store_true", help="Use selection and locked-test cells once.")
-    frontier.set_defaults(func=lambda args: _load("frontier_runner", "run")(args))
+    frontier.set_defaults(func=lambda args: _load("frontier.runner", "run")(args))
 
     viewer = commands.add_parser("frontier-view", help="Serve a live frontier graph and batch replay.")
     viewer.add_argument("--run", type=Path, required=True, help="Run directory or wave.json.")
     viewer.add_argument("--port", type=int, default=8765)
-    viewer.set_defaults(func=lambda args: _load("frontier_viewer", "serve")(args))
+    viewer.set_defaults(func=lambda args: _load("frontier.viewer", "serve")(args))
 
     rescore = commands.add_parser(
         "rescore",
