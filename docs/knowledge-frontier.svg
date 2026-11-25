@@ -87,7 +87,7 @@
       <text x="748" y="834" fill="#526078">3 attempts · 1 similar idea tried</text>
     </g>
     <text x="67" y="880" font-size="15" fill="#526078">Node weight = 1 / [(1 + attempts) × (1 + similar ideas tried)]. Normalize at each draw.</text>
-    <text x="67" y="912" font-size="16" font-weight="700">Idea + discovery data and current fit + constraints → HY4 → four equations. No scores.</text>
+    <text x="67" y="912" font-size="16" font-weight="700">Idea thread + images of data and current fit → HY4 → K new equations. No scores.</text>
     <rect x="40" y="963" width="1020" height="137" rx="16" fill="white"/>
     <text x="67" y="999" font-size="17" font-weight="700">03 / FOLLOW SURPRISES BEFORE MAKING CLAIMS</text>
     <text x="67" y="1035" font-size="17" font-weight="700">Harness fits the batch → logs observations → freezes prediction → checks unseen cells</text>

@@ -26,7 +26,27 @@ Run in rolling waves. At the start of each exploratory episode, draw a lane: **6
 - **Detour:** The harness draws from unresolved observations, outliers flagged in discovery, or combinations of ideas from unrelated branches. Prefer untried mechanism tags. Record leads and their lineage separately from the graph. Test the batch before drawing again; an early poor fit does not stop it.
 - **New root:** Draw a distinct, directly testable idea from a separate pool of observed patterns and untried mechanism families, seeded by the experimenter or predefined templates. The idea must have no prerequisites in the current map. If it's grounded in an observed pattern and not a duplicate, add it as a provisional standalone node; it can stay disconnected or acquire links later. If no candidate qualifies, treat the lane as unavailable rather than forcing a root.
 
-**HY4's only job is to turn the supplied idea into a batch of equations.** The experimenter authors a fixed prompt template and the initial idea descriptions. For each draw, the harness fills in the selected node's plain-language idea, what part of the current equation can change, angle and output conventions, allowed equation grammar, and requested batch size (start with four). The harness also renders a panel of observed discovery responses overlaid with the current fitted comparator, using a fixed or seeded cell sample. The comparator is the double Gaussian or the reference named by the selected node, not a model picked for having the best score. The overlay shows what the idea is meant to address; it does not compare or grade proposals. Do not send scalar or per-cell scores, rankings, win/loss labels, or prose summarizing previous candidate performance, even on follow-up calls.
+**HY4's only job is to turn a thread of ideas into a batch of equations.** The experimenter authors the fixed prompt template and the initial idea descriptions. For each draw, the harness starts the thread with the base equation, adds compatible equation ideas from the selected route or detour, and ends with the idea to test next. The thread is an ordered set of design ideas, not a claim that they have been confirmed. Do not merge mutually exclusive routes into a thread by default. An independent-root draw can start a new thread without inheriting earlier graph ideas; the base equation can still be shown as a reference.
+
+```text
+Combine the ideas in this thread:
+
+- Idea 1 — Base equation: {base_equation}
+- Idea 2 — {idea_2}
+- ...
+- Idea N — {idea_n}
+
+Give {K} structurally distinct equations that combine these ideas
+and could fit the data shown in the attached images.
+
+{angle_and_output_conventions}
+{allowed_equation_grammar}
+Return equations and their parameter definitions. Do not fit or rank them.
+```
+
+The harness attaches observed discovery responses overlaid with the current fitted comparator, using a fixed or seeded cell sample. The comparator is the double Gaussian or the reference named by the selected node, not a model picked for having the best score. The overlay shows what the thread is meant to address; it does not compare or grade proposals. Do not send scalar or per-cell scores, rankings, win/loss labels, or prose summarizing previous candidate performance, even on follow-up calls.
+
+[Example attachment: four discovery neurons overlaid with the double-Gaussian fit](knowledge-frontier-discovery-example.png).
 
 The harness validates outputs, fits all admissible equations in a batch, compares results, and updates the map. Canonicalize expressions to reject exact duplicates and count relabelings or parameter-only tweaks as the same family; prefer coverage of distinct structures when filling a batch. No lane uses fit scores to set draw weights. Save the prompt-template version, resolved text, panel inputs, random seed, candidate sets, effective probabilities, and draws so scheduling and model inputs can be reconstructed.
 
