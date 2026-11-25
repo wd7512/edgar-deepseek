@@ -11,6 +11,7 @@ DATASET_NAME = "gratings_drifting_GT1_2019_04_12_1.npy"
 DATASET_SHA256 = "dbfbb9cd7764bd15feddf8c0d79a8e17a51d956a978c01f87e54b472b42e1b57"
 SPLIT_SEED = 42
 TRIAL_SEED = 0
+DISCOVERY_PARTITION_SEED = 881
 ACTIVITY_THRESHOLD = 0.4
 CONCENTRATION_THRESHOLD = 0.55
 
@@ -71,6 +72,13 @@ def prepare(response, angles, protocol):
         **{f"{name}_cell_ids": cells[rows] for name, rows in groups.items()},
     }
     return x, y, groups, indices
+
+
+def discovery_partition(groups, seed=DISCOVERY_PARTITION_SEED):
+    """Shuffle the discovery cells and split them into exploration (three quarters) and confirmation."""
+    discovery = np.random.default_rng(seed).permutation(groups["discovery"])
+    cut = len(discovery) * 3 // 4
+    return discovery[:cut], discovery[cut:]
 
 
 def synthetic_recording():

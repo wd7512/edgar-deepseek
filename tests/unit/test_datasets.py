@@ -1,6 +1,6 @@
 import numpy as np
 
-from edgar_study.datasets import prepare, synthetic_recording
+from edgar_study.datasets import discovery_partition, prepare, synthetic_recording
 
 
 def test_strict_holdout_groups_are_disjoint_and_cover_eligible_cells():
@@ -20,3 +20,12 @@ def test_split_is_deterministic():
 def test_responses_are_scaled_to_norm_100():
     _, y, _, _ = prepare(*synthetic_recording(), "paper-fidelity")
     assert np.allclose(np.linalg.norm(np.asarray(y), axis=1), 100)
+
+
+def test_discovery_cells_split_into_three_quarters_exploration_and_the_rest_confirmation():
+    _, _, groups, _ = prepare(*synthetic_recording(), "strict-holdout-v1")
+    explore, confirm = discovery_partition(groups)
+
+    assert len(explore) == len(groups["discovery"]) * 3 // 4
+    assert sorted([*explore, *confirm]) == sorted(groups["discovery"])
+    assert list(explore) == list(discovery_partition(groups)[0])

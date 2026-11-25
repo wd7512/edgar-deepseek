@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 
 from edgar_study import fitting
-from edgar_study.datasets import load_dataset, prepare
+from edgar_study.datasets import DISCOVERY_PARTITION_SEED, discovery_partition, load_dataset, prepare
 from edgar_study.frontier.fits import double_gaussian_parent, measure
 from edgar_study.frontier.grammar import InvalidEquation, compile_equation
 from edgar_study.frontier.ideas import Idea, draw, draw_generated, generated_idea, route_mode, validate_graph
@@ -511,14 +511,12 @@ def _run(args, output):
     fitting.install(up["hypothesis_engine"], "lm-bounded")
     response, angles, sha = load_dataset(args.dataset, up["utils"].extract_stimulus_related_response)
     x, y, groups, indices = prepare(response, angles, "strict-holdout-v1")
-    discovery = np.random.default_rng(881).permutation(groups["discovery"])
-    cut = len(discovery) * 3 // 4
-    explore, confirm = discovery[:cut], discovery[cut:]
+    explore, confirm = discovery_partition(groups)
     manifest = {
         "dataset_sha256": sha,
         "model": MODEL,
         "seed": args.seed,
-        "discovery_partition_seed": 881,
+        "discovery_partition_seed": DISCOVERY_PARTITION_SEED,
         "exploration_cells": indices["eligible_cell_ids"][explore].tolist(),
         "confirmation_cells": indices["eligible_cell_ids"][confirm].tolist(),
         "batches": args.batches,

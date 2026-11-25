@@ -2,7 +2,15 @@ import numpy as np
 import pytest
 
 from edgar_study.frontier.grammar import compile_equation
-from edgar_study.frontier.protocol import STARTS, fit_equation, fit_model, solve
+from edgar_study.frontier.protocol import (
+    STARTS,
+    fit_equation,
+    fit_equation_training,
+    fit_model,
+    predict,
+    solve,
+    split_trials,
+)
 from edgar_study.frontier.seed import BASE
 
 SIGMA = 0.05
@@ -320,3 +328,28 @@ def test_parameters_far_from_the_truth_in_declared_values_do_not_stop_a_good_fit
     bad = {"m": 0.0, "b": 5.0, "a1": 0.1, "a2": 0.1, "s": 2.0}
     result = fit_equation(equation(initial=bad), (theta, y), 100)
     assert result.training_mse < 20 * SIGMA**2
+
+
+def test_fitting_only_the_training_trials_gives_the_protocols_parameters():
+    x, y = double_gaussian_cohort(cells=6)
+    train, _ = split_trials(x)
+    shifted = equation(initial={**DOUBLE_GAUSSIAN_START, "m": 1.0})
+    warm = np.tile(np.array([3.0, 0.3, 1.5, 1.0, 0.6], dtype=np.float32), (6, 1))
+
+    whole = fit_equation(shifted, (x, y), 100, warm=warm)
+    alone = fit_equation_training(shifted, x[:, train], y[:, train], 100, warm=warm)
+
+    np.testing.assert_array_equal(alone, whole.params)
+
+
+def test_a_training_fit_can_use_more_iterations_and_a_relative_step_cap():
+    x, y = double_gaussian_cohort(cells=4)
+    far = equation(initial={**DOUBLE_GAUSSIAN_START, "a1": 40.0})
+
+    capped = fit_equation_training(far, x, y, 100)
+    relative = fit_equation_training(far, x, y, 300, relative_step=True)
+
+    def error(params):
+        return float(np.mean((np.asarray(predict(far.model, x, params)) - y) ** 2))
+
+    assert error(relative) < error(capped)
