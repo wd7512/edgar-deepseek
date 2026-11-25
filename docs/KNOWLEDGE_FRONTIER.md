@@ -48,7 +48,7 @@ Return only a JSON object with 'idea' and 'equations'.
 The idea has a short, concise 'title' you choose, a specific stable 'mechanism' key,
 and a concrete 'change'. Provide zero to {K} structurally distinct equations in 'equations'.
 {angle_and_output_conventions}
-{allowed_equation_grammar_and_optional_nesting_map}
+{allowed_equation_grammar}
 ```
 
 A revisit prompt keeps the same idea and asks only for an array of new equations. The templates below apply only with `--graph`.
@@ -160,7 +160,7 @@ Open [localhost:8765](http://127.0.0.1:8765/). The read-only server starts with 
 
 Nodes show penalized fit score (lower is better), unpenalized held-out MSE, and free parameter count for their best-scoring equation through the selected batch. Click a node for metrics on individual equations. The double Gaussian is scored on the same exploration cohort. These metrics appear in the viewer and audit, never in HY4 prompts.
 
-When a candidate can reproduce a simpler fit, the runner starts each neuron from that inherited fit and keeps it unless another fit improves training MSE. It recognizes standalone free offsets and common exponent, baseline harmonic, and Gaussian blend extensions. Proposals can also supply an optional `nesting` map for the double Gaussian or a parent equation; the runner checks the mapped predictions on an angle grid and checks the inherited fit on the training angles. Unrecognized or unverified nesting claims do not give a candidate an inherited start.
+Every equation is fitted the same way, from scratch. Each model supplies its own start (the double Gaussian its data-driven estimator, a generated equation its declared `initial` values), computed on training trials only. The fit runs from that start plus seeded jittered copies (`--starts`, default 4), keeps each neuron's lowest training error, and stops once steps stop improving. Parameters are put in canonical order first, so equivalent equations receive identical fits, and held-out trials never influence which start wins. The runner does not inherit fits from parents and ignores any `nesting` map in a proposal.
 
 Equation expressions may use a comparison with `<`, `<=`, `>`, or `>=` as a real-valued smooth cutoff, for example `sigmoid(20 × (limit − x))`, so its limit can be fitted. An undeclared symbol is rejected with an `unknown_name` reason naming it. Invalid proposals and unreadable replies follow the single-retry rule above.
 

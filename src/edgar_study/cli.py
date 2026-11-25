@@ -220,6 +220,9 @@ def main():
     frontier.add_argument(
         "--new-probability", type=float, default=0.8, help="Chance of a new idea vs. a revisit."
     )
+    frontier.add_argument(
+        "--starts", type=int, default=4, help="Cold starts per fit: the model's own start plus seeded jitter."
+    )
     frontier.add_argument("--finalize", action="store_true", help="Use selection and locked-test cells once.")
     frontier.set_defaults(func=lambda args: _load("frontier.runner", "run")(args))
 

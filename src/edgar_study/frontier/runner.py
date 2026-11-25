@@ -14,22 +14,12 @@ import numpy as np
 
 from edgar_study import fitting
 from edgar_study.datasets import load_dataset, prepare
-from edgar_study.frontier.fits import (
-    BASE_NAMES,
-    BASE_PROBES,
-    baseline_templates,
-    double_gaussian_parent,
-    fit_nested,
-    fit_offset,
-    measure,
-    offset_bounds,
-    offset_embedding,
-    verified_mapping,
-)
+from edgar_study.frontier.fits import double_gaussian_parent, measure
 from edgar_study.frontier.grammar import InvalidEquation, compile_equation
 from edgar_study.frontier.ideas import Idea, draw, draw_generated, generated_idea, route_mode, validate_graph
 from edgar_study.frontier.images import ParentFit, prepare_images
 from edgar_study.frontier.prompts import generated_prompt, idea_prompt
+from edgar_study.frontier.protocol import STARTS, solve
 from edgar_study.frontier.replies import InvalidReply, decode, decode_json, equation_list
 from edgar_study.frontier.seed import BASE, BASELINE_ID, baseline_node
 from edgar_study.go_client import GoClient, Ledger, fetch_models, is_free, load_key
@@ -61,6 +51,7 @@ async def execute(
     waves=1,
     resume=False,
     new_probability=0.8,
+    starts=STARTS,
 ):
     """Explore rolling waves, then confirm a frozen shortlist; optionally select and test once."""
     discovery = ideas is None
@@ -68,8 +59,8 @@ async def execute(
     validate_graph(ideas)
     if not 0 <= new_probability <= 1:
         raise ValueError("New-idea probability must be between zero and one.")
-    if min(batches, k, waves) < 1:
-        raise ValueError("Wave count, batch count and equations per batch must be positive.")
+    if min(batches, k, waves, starts) < 1:
+        raise ValueError("Wave count, batch count, equations per batch and starts must be positive.")
     output.mkdir(parents=True, exist_ok=True)
     path = output / "wave.json"
     if path.exists() and not resume:
@@ -84,7 +75,7 @@ async def execute(
     wave: dict[str, Any] = {
         "version": 3,
         "seed": seed,
-        "fit_protocol": "nested_parent_v3",
+        "fit_protocol": "cold_multistart_v1",
         "idea_source": "generated" if discovery else "catalog",
         "idea_catalog": [asdict(i) for i in ideas],
         "graph": [baseline_node()],
@@ -93,7 +84,14 @@ async def execute(
         "confirmation": [],
         "status": "exploring",
     }
-    config = {"batches": batches, "waves": waves, "k": k, "max_iter": max_iter, "finalize": final is not None}
+    config = {
+        "batches": batches,
+        "waves": waves,
+        "k": k,
+        "max_iter": max_iter,
+        "starts": starts,
+        "finalize": final is not None,
+    }
     if discovery:
         config["new_probability"] = new_probability
 
@@ -172,67 +170,19 @@ async def execute(
         wave["status"] = "exploring"
     wave["config"] = config
     _write(path, wave)
-    if "baseline_exploration" not in wave:
-        wave["baseline_exploration"] = measure(up, double_gaussian_parent(up), explore, max_iter)
-
     baseline_fit = double_gaussian_parent(up)
+    if "baseline_exploration" not in wave:
+        wave["baseline_exploration"] = measure(baseline_fit.model, baseline_fit.solve, explore, max_iter)
 
     @cache
     def reference_fit(node):
         if node == BASELINE_ID:
             return baseline_fit
         candidate = references[node]
-        solve, _ = fit_strategy(node, candidate, tuple(lineage[node]))
-        return ParentFit(node, candidate.model, candidate.estimator, solve)
+        return ParentFit(node, candidate.model, candidate.estimator, partial(solve, candidate, starts=starts))
 
-    def fit_strategy(node, equation, parents):
-        mappings = []
-        bounds = None
-        standalone_offset = tuple(parents) in {(), (BASELINE_ID,)}
-        supplied = equation.nesting if isinstance(equation.nesting, dict) else {}
-        template = baseline_templates().get(equation.key) if len(equation.initial) > len(BASE_NAMES) else None
-        if template is not None or BASELINE_ID in supplied:
-            bindings = (
-                dict(zip(equation.canonical_names, template, strict=True))
-                if template is not None
-                else supplied[BASELINE_ID]
-            )
-            embed = verified_mapping(equation, baseline_fit, BASE_NAMES, BASE_PROBES, bindings)
-            if embed is not None:
-                mappings.append((baseline_fit, embed))
-                if standalone_offset:
-                    bounds = offset_bounds(embed)
-        for name in parents:
-            if name == BASELINE_ID:
-                continue
-            parent = references[name]
-            if name not in supplied or len(equation.initial) <= len(parent.initial):
-                continue
-            initial = np.array(tuple(parent.initial.values()))
-            perturb = np.random.default_rng(0).uniform(-0.3, 0.3, size=(4, len(initial)))
-            probes = np.concatenate((initial[None, :], initial + perturb * (0.2 + np.abs(initial))))
-            fit = reference_fit(name)
-            embed = verified_mapping(equation, fit, tuple(parent.initial), probes, supplied[name])
-            if embed is not None:
-                mappings.append((fit, embed))
-        if not mappings:
-            if standalone_offset and len(equation.initial) == 6:
-                try:
-                    start = offset_embedding(equation, baseline_fit.model)
-                except ValueError:
-                    return None, "estimator"
-                return partial(fit_offset, up, equation, embedding=start), "fitted_double_gaussian"
-            return None, "estimator"
-        source = (
-            "fitted_parent"
-            if any(parent.node_id != BASELINE_ID for parent, _ in mappings)
-            else "fitted_double_gaussian"
-        )
-        return partial(fit_nested, up, equation, mappings=tuple(mappings), bounds=bounds), source
-
-    def measure_node(node, equation, cohort, *, parents=None):
-        solve, source = fit_strategy(node, equation, tuple(lineage[node] if parents is None else parents))
-        return measure(up, equation, cohort, max_iter, solve=solve, initialization=source)
+    def measure_node(equation, cohort):
+        return measure(equation.model, partial(solve, equation, starts=starts), cohort, max_iter)
 
     def evaluate(proposal, event, step, *, replaces=None, replacement=False):
         node, parents = event["node"], event["parents"]
@@ -260,7 +210,7 @@ async def execute(
             routes = idea.routes or (() if idea.lane == "root" else ((BASELINE_ID,),))
             wave["graph"].append({**asdict(idea), "routes": routes, "introduced_at": step + 1})
         try:
-            result = measure_node(node, candidate, explore, parents=parents)
+            result = measure_node(candidate, explore)
             record.update(status="fitted", metrics=result)
             depth[idea.branch] += 1
             if node not in references:
@@ -421,13 +371,13 @@ async def execute(
         wave["status"] = "no_fitted_equations"
         _write(path, wave)
         return json.loads(path.read_text())
-    baseline = measure(up, double_gaussian_parent(up), confirm, max_iter)
+    baseline = measure(baseline_fit.model, baseline_fit.solve, confirm, max_iter)
     wave["confirmation_baseline"] = baseline
     measured = {}
     for node, eq in references.items():
         row = {"node": node}
         try:
-            result = measure_node(node, eq, confirm)
+            result = measure_node(eq, confirm)
             measured[node] = result
             comparators = {
                 BASELINE_ID: baseline,
@@ -461,19 +411,19 @@ async def execute(
         wave["selection"] = {"status": "started"}
         _write(path, wave)
         selection, locked = final
-        scores = {"double_gaussian": measure(up, double_gaussian_parent(up), selection, max_iter)}
+        scores = {"double_gaussian": measure(baseline_fit.model, baseline_fit.solve, selection, max_iter)}
         for node in sorted(n for n in supported if supported_claim(n)):
             try:
-                scores[node] = measure_node(node, references[node], selection)
+                scores[node] = measure_node(references[node], selection)
             except ValueError:
                 continue
         winner = min(scores, key=lambda name: (scores[name]["score"], name))
         wave["selection"] = {"metrics": scores, "winner": winner}
         _write(path, wave)
-        locked_baseline = measure(up, double_gaussian_parent(up), locked, max_iter)
+        locked_baseline = measure(baseline_fit.model, baseline_fit.solve, locked, max_iter)
         wave["locked"] = {"double_gaussian": locked_baseline}
         if winner != "double_gaussian":
-            wave["locked"][winner] = measure_node(winner, references[winner], locked)
+            wave["locked"][winner] = measure_node(references[winner], locked)
     wave["status"] = "complete"
     _write(path, wave)
     return json.loads(path.read_text())
@@ -509,8 +459,8 @@ def run(args):
 
 
 def _run(args, output):
-    if min(args.waves, args.batches, args.k) < 1 or args.seed < 0:
-        raise SystemExit("Use positive waves, batches and K and a nonnegative seed.")
+    if min(args.waves, args.batches, args.k, args.starts) < 1 or args.seed < 0:
+        raise SystemExit("Use positive waves, batches, K and starts and a nonnegative seed.")
     ideas = None
     if args.graph is not None:
         ideas = tuple(
@@ -548,6 +498,7 @@ def _run(args, output):
         "confirmation_cells": indices["eligible_cell_ids"][confirm].tolist(),
         "batches": args.batches,
         "k": args.k,
+        "starts": args.starts,
         "waves": args.waves,
         "finalize": args.finalize,
         "idea_source": "generated" if ideas is None else "catalog",
@@ -580,6 +531,7 @@ def _run(args, output):
                 waves=args.waves,
                 ideas=ideas,
                 new_probability=args.new_probability,
+                starts=args.starts,
                 resume=args.resume,
             )
         finally:
