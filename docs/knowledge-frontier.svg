@@ -1,12 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="890" viewBox="0 0 1100 890" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="1140" viewBox="0 0 1100 1140" role="img" aria-labelledby="title desc">
   <title id="title">The knowledge frontier</title>
-  <desc id="desc">Two alternative prerequisite bundles lead to a flank-width claim. A stochastic scheduler chooses frontier, detour, or new independent root. In the frontier lane it favors shallower branches. Leads become claims only after confirmation on unseen discovery cells.</desc>
+  <desc id="desc">Two alternative prerequisite bundles lead to a flank-width claim. The scheduler draws frontier, detour, or new independent root. For a frontier draw it first samples a branch by inverse evidence depth plus one, then samples an open, testable node by inverse prior attempts plus one. The example draws baseline drift, then shows three possible nodes and their conditional probabilities. Leads become claims only after confirmation on unseen discovery cells.</desc>
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
       <path d="M0 0L8 4L0 8Z" fill="#6b7280"/>
     </marker>
   </defs>
-  <rect width="1100" height="890" rx="20" fill="#f4f5f8"/>
+  <rect width="1100" height="1140" rx="20" fill="#f4f5f8"/>
   <g font-family="system-ui, sans-serif" fill="#17233a">
     <text x="48" y="61" font-size="35" font-weight="750">The knowledge frontier</text>
     <text x="49" y="93" font-size="18" fill="#526078">Choose an unresolved claim to test, not a score to beat.</text>
@@ -46,23 +46,51 @@
     <rect x="294" y="384" width="512" height="70" rx="12" fill="#e8edff"/>
     <text x="550" y="412" text-anchor="middle" font-size="19" font-weight="700">Separate flank widths explain a recurring miss</text>
     <text x="550" y="438" text-anchor="middle" font-size="15" fill="#526078">Unresolved until at least one full route is supported</text>
-    <rect x="40" y="499" width="1020" height="181" rx="16" fill="white"/>
-    <text x="67" y="535" font-size="17" font-weight="700">02 / WHERE HY4 FLASH FREE GOES NEXT</text>
+    <rect x="40" y="499" width="1020" height="447" rx="16" fill="white"/>
+    <text x="67" y="535" font-size="17" font-weight="700">02 / HOW HY4 FLASH FREE GETS ITS NEXT NODE</text>
+    <text x="67" y="565" font-size="15" font-weight="700">1. Draw a lane</text>
     <g font-size="16">
-      <rect x="67" y="552" width="300" height="65" rx="8" fill="#eef1f7"/>
-      <text x="82" y="578" font-weight="700">Peak tips</text>
-      <text x="82" y="601" fill="#526078">6 contrasts · 15% within frontier</text>
-      <rect x="400" y="552" width="300" height="65" rx="8" fill="#eef1f7"/>
-      <text x="415" y="578" font-weight="700">Flanks</text>
-      <text x="415" y="601" fill="#526078">2 contrasts · 34% within frontier</text>
-      <rect x="733" y="552" width="300" height="65" rx="8" fill="#fff0cf" stroke="#d59721"/>
-      <text x="748" y="578" font-weight="700">Baseline drift · one negative test</text>
-      <text x="748" y="601">1 contrast · 51% within frontier</text>
+      <rect x="67" y="576" width="300" height="58" rx="8" fill="#e8edff"/>
+      <text x="82" y="600" font-weight="700">60% · Existing frontier</text>
+      <text x="82" y="621" fill="#526078">Draw a branch, then a node ↓</text>
+      <rect x="400" y="576" width="300" height="58" rx="8" fill="#eef1f7"/>
+      <text x="415" y="600" font-weight="700">30% · Detour</text>
+      <text x="415" y="621" fill="#526078">Follow a surprise for up to 3 tests</text>
+      <rect x="733" y="576" width="300" height="58" rx="8" fill="#eef1f7"/>
+      <text x="748" y="600" font-weight="700">10% · Independent root</text>
+      <text x="748" y="621" fill="#526078">Propose a node without prerequisites</text>
     </g>
-    <text x="67" y="651" font-size="16" fill="#526078">Draw an episode: 60% frontier (above) · 30% follow a surprise · 10% try a new independent root.</text>
-    <rect x="40" y="697" width="1020" height="153" rx="16" fill="white"/>
-    <text x="67" y="734" font-size="17" font-weight="700">03 / FOLLOW SURPRISES BEFORE MAKING CLAIMS</text>
-    <text x="67" y="774" font-size="17" font-weight="700">Unexpected pattern → exploratory detour → frozen prediction → fresh discovery check</text>
-    <text x="67" y="813" font-size="16" fill="#526078">Let the idea develop across several tests. Log it as a lead until it holds up on unseen cells.</text>
+    <text x="67" y="666" font-size="15" font-weight="700">2. If frontier: draw an eligible branch</text>
+    <text x="1033" y="666" text-anchor="end" font-size="15" fill="#526078">Weight = 1 / (1 + informative contrasts)</text>
+    <g font-size="15">
+      <rect x="67" y="677" width="300" height="56" rx="8" fill="#eef1f7"/>
+      <text x="82" y="700" font-weight="700">Peak tips · 15%</text>
+      <text x="82" y="720" fill="#526078">6 informative contrasts</text>
+      <rect x="400" y="677" width="300" height="56" rx="8" fill="#eef1f7"/>
+      <text x="415" y="700" font-weight="700">Flanks · 34%</text>
+      <text x="415" y="720" fill="#526078">2 informative contrasts</text>
+      <rect x="733" y="677" width="300" height="56" rx="8" fill="#fff0cf" stroke="#d59721"/>
+      <text x="748" y="700" font-weight="700">Baseline drift · 51% · example draw</text>
+      <text x="748" y="720" fill="#526078">1 informative contrast, negative</text>
+    </g>
+    <path d="M883 733V774" stroke="#6b7280" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="67" y="773" font-size="15" font-weight="700">3. Within baseline drift: draw an open, testable node</text>
+    <g font-size="15">
+      <rect x="67" y="786" width="300" height="64" rx="8" fill="#fff0cf" stroke="#d59721"/>
+      <text x="82" y="812" font-weight="700">Broad angular wave · 57%</text>
+      <text x="82" y="834" fill="#526078">0 prior attempts · example draw</text>
+      <rect x="400" y="786" width="300" height="64" rx="8" fill="#eef1f7"/>
+      <text x="415" y="812" font-weight="700">Asymmetric offset · 29%</text>
+      <text x="415" y="834" fill="#526078">1 prior attempt</text>
+      <rect x="733" y="786" width="300" height="64" rx="8" fill="#eef1f7"/>
+      <text x="748" y="812" font-weight="700">Between-peak floor · 14%</text>
+      <text x="748" y="834" fill="#526078">3 prior attempts</text>
+    </g>
+    <text x="67" y="880" font-size="15" fill="#526078">Node weight = 1 / (1 + prior attempts). Normalize weights within each draw.</text>
+    <text x="67" y="912" font-size="16" font-weight="700">The sampled node becomes HY4’s next test prompt. No fit ranking enters the draw.</text>
+    <rect x="40" y="963" width="1020" height="137" rx="16" fill="white"/>
+    <text x="67" y="999" font-size="17" font-weight="700">03 / FOLLOW SURPRISES BEFORE MAKING CLAIMS</text>
+    <text x="67" y="1035" font-size="17" font-weight="700">Unexpected pattern → exploratory detour → frozen prediction → fresh discovery check</text>
+    <text x="67" y="1071" font-size="16" fill="#526078">Let the idea develop across several tests. Log it as a lead until it holds up on unseen cells.</text>
   </g>
 </svg>
