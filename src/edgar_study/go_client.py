@@ -106,17 +106,27 @@ class GoClient:
             headers={**headers(load_key()), "x-opencode-session": session_id},
         )
 
-    async def chat(self, model, prompt, temperature=None, effort=None, img_bytes=None, **meta):
+    async def chat(self, model, prompt, temperature=None, effort=None, img_bytes=None, *, images=(), **meta):
         """Return the reply text, or None on failure (upstream scores None as a failed program)."""
         if model not in self.free_models and not self.allow_paid:
             raise BudgetExhausted(f"{model} is not a free model; pass --allow-paid to use it.")
         self.ledger.check()
-        content = prompt
+        attachments = tuple(images)
         if img_bytes is not None:
-            data = base64.b64encode(img_bytes).decode()
+            if attachments:
+                raise ValueError("Use either img_bytes or images, not both.")
+            attachments = (img_bytes,)
+        content = prompt
+        if attachments:
             content = [
                 {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{data}"}},
+                *[
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{base64.b64encode(data).decode()}"},
+                    }
+                    for data in attachments
+                ],
             ]
         body = {
             "model": model,
@@ -133,7 +143,8 @@ class GoClient:
             "reasoning_effort": effort,
             "temperature": temperature,
             **meta,
-            "image": img_bytes is not None,
+            "image": bool(attachments),
+            "image_count": len(attachments),
             "prompt_sha256": code_key(prompt),
         }
 
