@@ -79,6 +79,7 @@ def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):
     assert seen[2][1].startswith("Combine the ideas in this thread:")
     assert "Do not add an unrelated mechanism" in seen[2][1]
     assert result["version"] == 3
+    assert result["baseline_exploration"]["score"] > 0
     assert [row["node"] for row in snapshots[0]["graph"]] == ["double_gaussian"]
     assert [row["node"] for row in snapshots[2]["graph"]] == [
         "double_gaussian",

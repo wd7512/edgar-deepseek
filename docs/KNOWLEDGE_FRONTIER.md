@@ -130,3 +130,5 @@ uv run edgar frontier-view --run results/frontier/wave-1
 ```
 
 Open [localhost:8765](http://127.0.0.1:8765/). The read-only server starts with the double Gaussian while waiting for a new run and follows `wave.json` every two seconds. Use the timeline to replay a prefix, then **Live / latest** to resume following. Click an idea to see its probes and open individual equations. Drag nodes to rearrange the diagram; positions are saved in that browser for the run, and **Reset layout** restores the starting positions. Arrows show prerequisite routes. An **AND** junction requires a fit from every parent; separate routes are alternatives. Older audits replay the graph they recorded.
+
+Each scored equation shows its penalized exploration fit score (lower is better). New runs score the double Gaussian on the same exploration cohort for comparison. These scores appear in the viewer and the audit, never in HY4 prompts.

@@ -12,15 +12,6 @@ from urllib.parse import parse_qs, urlsplit
 
 from edgar_study.frontier_seed import BASELINE_ID, baseline_node
 
-COLORS = {
-    "baseline": "#c3a7f9",
-    "blocked": "#657686",
-    "ready": "#9ebaf7",
-    "attempted": "#ffc977",
-    "fitted": "#59d8c6",
-    "confirmed": "#ade978",
-}
-
 MODES = {
     "single_idea": "Single-idea frontier",
     "combination": "AND combination",
@@ -45,17 +36,16 @@ STYLE = """
 :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#101721;color:#edf4fc;
 font:13px system-ui,sans-serif}main{max-width:1250px;margin:auto;padding:12px 20px;position:relative}
 h1{font-size:19px;margin:0}h2{font-size:15px;margin:0}p,small{color:#acbfd0}
-.bar,.legend{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:7px 0}
+.bar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:7px 0}
 a,.pill{color:#b7ecff;padding:2px 4px;text-decoration:none}a:hover{text-decoration:underline}
 a.active{color:#80e8cd;font-weight:700}.graph-shell{position:relative;border-block:1px solid #344759}
 .graph{display:block;width:100%;height:min(var(--graph-h),max(125px,calc(100dvh - 155px)))}
 .node{cursor:grab;touch-action:none;outline:none}.node:active{cursor:grabbing}
-.node rect{fill:#222f40;stroke-width:1.5}.node.current rect,.node:focus-visible rect{stroke-width:3}
+.node rect{fill:#222f40;stroke:#899aae;stroke-width:1.5}
+.node.current rect,.node:focus-visible rect{stroke:#b7ecff;stroke-width:2.5}
 .node text{fill:#edf4fc;font-size:12px;font-weight:650;text-anchor:middle;pointer-events:none;user-select:none}
 .node .sub{fill:#bfd0e1;font-size:10px;font-weight:400}.route path{fill:none;stroke:#657686;stroke-width:1.5}
 .route circle{fill:#263647;stroke:#657686}.route text{fill:#e0e8f2;font-size:9px;text-anchor:middle}
-.route[data-route-state=ready] path,.route[data-route-state=ready] circle{stroke:#6bcabc}
-.key{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--key);margin-right:6px}
 button{font:inherit;color:#b7ecff;background:#182331;border:1px solid #41546a;border-radius:4px;cursor:pointer}
 .inspector{position:absolute;right:0;top:0;width:min(360px,100%);max-height:100%;overflow:auto;z-index:1;
 background:#182331;border:1px solid #41546a;border-radius:4px;padding:12px;overflow-wrap:anywhere}
@@ -227,22 +217,18 @@ def _label(idea):
     return idea.get("label") or idea["text"]
 
 
-def _graph(nodes, catalog, fitted, attempted, counts, confirmed, current):
+def _graph(nodes, catalog, counts, current):
     positions, height = _layout(catalog)
     edges, cards = [], []
     for node, idea in nodes.items():
         x, y = positions[node]
         routes = idea["routes"]
-        ready = not routes
         for i, route in enumerate(routes):
-            available = all(p in fitted or (p == BASELINE_ID and p in nodes) for p in route)
-            ready |= available
             if not all(p in nodes for p in route):
                 continue
             label = escape(" + ".join(_label(nodes[p]) for p in route) + " → " + _label(idea))
             edges.append(
-                f'<g class="route" data-route-state="{"ready" if available else "blocked"}" '
-                f'data-child="{escape(node)}" data-offset="{40 * (i - (len(routes) - 1) / 2)}">'
+                f'<g class="route" data-child="{escape(node)}" data-offset="{40 * (i - (len(routes) - 1) / 2)}">'
                 f"<title>{label}</title>"
             )
             marker = ' marker-end="url(#arrow)"'
@@ -253,18 +239,6 @@ def _graph(nodes, catalog, fitted, attempted, counts, confirmed, current):
                     f'<path data-out=""{marker}/><g class="joint"><circle r="12"/><text y="3">AND</text></g>'
                 )
             edges.append("</g>")
-        state = next(
-            name
-            for name, enabled in (
-                ("baseline", node == BASELINE_ID and bool(idea.get("equation"))),
-                ("confirmed", node in confirmed),
-                ("fitted", node in fitted),
-                ("attempted", node in attempted),
-                ("ready", ready),
-                ("blocked", True),
-            )
-            if enabled
-        )
         title = _label(idea)
         lines = wrap(title, width=29, max_lines=3, placeholder="…")
         labels = "".join(
@@ -272,14 +246,14 @@ def _graph(nodes, catalog, fitted, attempted, counts, confirmed, current):
             for i, line in enumerate(lines)
         )
         count = counts[node]
-        summary = f"{count} equation{'s' if count != 1 else ''} · {state}"
+        summary = f"{count} equation{'s' if count != 1 else ''}"
         cards.append(
             f'<g class="node{" current" if node == current else ""}" data-node="{escape(node)}" '
-            f'data-state="{state}" data-equations="{count}" data-home-x="{x}" data-home-y="{y}" '
+            f'data-equations="{count}" data-home-x="{x}" data-home-y="{y}" '
             f'transform="translate({x},{y})" tabindex="0" role="button" '
             f'aria-label="{escape(title)}: {summary}">'
             f"<title>{escape(idea['text'])}</title>"
-            f'<rect width="192" height="68" x="-96" y="-34" rx="5" stroke="{COLORS[state]}"/>'
+            '<rect width="192" height="68" x="-96" y="-34" rx="5"/>'
             f'{labels}<text class="sub" y="25">{summary}</text></g>'
         )
     return (
@@ -307,11 +281,19 @@ def _mode(event):
     return MODES.get(event.get("mode", fallback), MODES[fallback])
 
 
-def _inspector(node, idea, probes, reference):
+def _score_label(metrics, reason=""):
+    score = (metrics or {}).get("score")
+    if isinstance(score, (float, int)):
+        return f'<span title="Penalized exploration fit score; lower is better">Fit score: {score:.6g}</span>'
+    return f"No fit score ({escape(reason)})" if reason else "No fit score"
+
+
+def _inspector(node, idea, probes, reference, baseline_metrics):
     seed = idea.get("equation") if node == BASELINE_ID else None
     cards = (
         [
-            '<details class="probe" data-equation-id="seed"><summary>Starting equation</summary>'
+            '<details class="probe" data-equation-id="seed">'
+            f"<summary>Starting equation · {_score_label(baseline_metrics)}</summary>"
             f"<code>{escape(seed)}</code></details>"
         ]
         if seed
@@ -325,10 +307,11 @@ def _inspector(node, idea, probes, reference):
             if not equation:
                 invalid += candidate.get("status") == "invalid"
                 continue
-            status = escape(candidate.get("status", "").replace("_", " "))
+            reason = {"duplicate": "duplicate", "fit_failed": "fit failed"}.get(candidate.get("status"), "")
+            score = _score_label(candidate.get("metrics"), reason)
             error = candidate.get("error")
             equations.append(
-                f'<details data-equation-id="{batch}-{i}"><summary>Equation {i} · {status}</summary>'
+                f'<details data-equation-id="{batch}-{i}"><summary>Equation {i} · {score}</summary>'
                 f"<code>{escape(equation)}</code>"
                 + (f"<p>{escape(error)}</p>" if error else "")
                 + "</details>"
@@ -342,8 +325,13 @@ def _inspector(node, idea, probes, reference):
         cards.append(
             f'<div class="probe"><strong>Batch {batch} · {_mode(event)}</strong>{"".join(equations)}</div>'
         )
-    if reference and not any(reference == _equation(c) for _, e in probes for c in e.get("candidates", [])):
-        cards.append(f"<p>Reference fit: <code>{escape(reference)}</code></p>")
+    if reference and not any(
+        reference["equation"] == _equation(c) for _, e in probes for c in e.get("candidates", [])
+    ):
+        cards.append(
+            f"<p>Reference equation · {_score_label(reference.get('exploration'))}<br>"
+            f"<code>{escape(reference['equation'])}</code></p>"
+        )
     history = "".join(cards) or "<p>No probes yet.</p>"
     return (
         f'<aside class="inspector" data-idea-detail="{escape(node)}" aria-label="Idea details" hidden>'
@@ -367,7 +355,6 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
     probes = defaultdict(list)
     for batch, event in enumerate(episodes, 1):
         probes[event["node"]].append((batch, event))
-    attempted = Counter(event["node"] for event in episodes)
     counts = Counter(
         event["node"]
         for event in episodes
@@ -376,13 +363,6 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
     )
     if nodes.get(BASELINE_ID, {}).get("equation"):
         counts[BASELINE_ID] = 1
-    fitted = Counter(
-        event["node"]
-        for event in episodes
-        for candidate in event.get("candidates", [])
-        if candidate.get("status") == "fitted"
-    )
-    confirmed = {key for key, state in wave.get("claims", {}).items() if final and state == "supported_fit"}
     active = wave.get("active_probe") if live else None
     selected = active or (episodes[-1] if episodes else {})
     current = selected.get("node", "")
@@ -400,10 +380,6 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
         )
     if nodes:
         bar += '<button type="button" data-reset>Reset layout</button>'
-    legend = "".join(
-        f'<span class="pill"><i class="key" style="--key:{color}"></i>{state.title()}</span>'
-        for state, color in COLORS.items()
-    )
     if current in catalog:
         label = escape(_label(catalog[current]))
         lead = f"Running batch {active['batch']}" if active else "Latest probe"
@@ -416,12 +392,12 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
     if nodes:
         shortlist = wave.get("shortlist", {}) if final else {}
         inspectors = "".join(
-            _inspector(node, idea, probes[node], shortlist.get(node, {}).get("equation"))
+            _inspector(node, idea, probes[node], shortlist.get(node), wave.get("baseline_exploration"))
             for node, idea in nodes.items()
         )
-        graph = _graph(nodes, catalog, fitted, attempted, counts, confirmed, current)
+        graph = _graph(nodes, catalog, counts, current)
         content += (
-            f'<section class="graph-shell">{graph}{inspectors}</section><div class="legend">{legend}</div>'
+            f'<section class="graph-shell">{graph}{inspectors}</section>'
             "<small>Click a node for probes and equations · Drag to move · AND requires every parent fit</small>"
         )
     replay_note = wave.get("replay_note")

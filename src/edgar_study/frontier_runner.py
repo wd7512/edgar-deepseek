@@ -458,6 +458,7 @@ async def execute(
         "status": "exploring",
     }
     _write(path, wave)
+    wave["baseline_exploration"] = _measure(up, _baseline(up), explore, max_iter)
     for step in range(batches * waves):
         choice = draw(ideas, references, attempts, rng, depth)
         if choice is None:
