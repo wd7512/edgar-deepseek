@@ -47,10 +47,12 @@ def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):
     x, y, _, _ = prepare(responses, angles, "strict-holdout-v1")
     x, y = np.tile(np.asarray(x), (4, 1)), np.tile(np.asarray(y), (4, 1))
     seen = []
+    snapshots = []
 
     class Stub:
         async def submit(self, batch, prompt):
             seen.append((len(batch.images), prompt))
+            snapshots.append(json.loads((tmp_path / "wave.json").read_text()))
             return json.dumps([{"equation": f"b + a*cos({len(seen)}*theta)", "initial": {"b": 3, "a": 1}}])
 
     result = asyncio.run(
@@ -75,7 +77,20 @@ def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):
     assert any("Use one circular harmonic." in prompt for _, prompt in seen)
     assert all("score" not in prompt.lower() for _, prompt in seen)
     assert seen[2][1].startswith("Combine the ideas in this thread:")
+    assert "Do not add an unrelated mechanism" in seen[2][1]
+    assert result["version"] == 2
+    assert [row["node"] for row in snapshots[0]["graph"]] == ["a", "b"]
+    assert [row["node"] for row in snapshots[2]["graph"]] == ["a", "b"]
+    assert snapshots[2]["active_probe"]["mode"] == "combination"
+    assert [row["introduced_at"] for row in result["graph"]] == [0, 0, 3]
+    assert "active_probe" not in result
     assert result["episodes"][0]["candidates"][0]["status"] == "fitted"
     assert {row["node"] for row in result["confirmation"]} == {"a", "b", "c"}
     assert result["shortlist"]["c"]["parents"] == ["a", "b"]
     assert json.loads((tmp_path / "wave.json").read_text()) == result
+
+
+def test_tried_independent_root_can_be_probed_again():
+    root = Idea("root", "peaks", "harmonic", "Use circular harmonics.", lane="root")
+    choice = draw((root,), {}, {"root": 1}, np.random.default_rng(8))
+    assert choice["node"] == "root"
