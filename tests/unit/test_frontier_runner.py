@@ -8,7 +8,16 @@ import pytest
 
 from edgar_study import fitting
 from edgar_study.datasets import prepare, synthetic_recording
-from edgar_study.frontier_runner import Idea, compile_equation, draw, execute, validate_graph
+from edgar_study.frontier_runner import (
+    BASE,
+    Idea,
+    _baseline,
+    _measure,
+    compile_equation,
+    draw,
+    execute,
+    validate_graph,
+)
 from edgar_study.upstream import import_upstream
 
 
@@ -21,6 +30,47 @@ def test_equation_grammar_rejects_code_and_deduplicates_parameter_renames():
     )
     with pytest.raises(ValueError):
         compile_equation({"equation": "__import__('os').system('false')", "initial": {}})
+
+
+def test_free_offset_starts_at_the_fitted_baseline_and_improves_on_true_offsets():
+    up = import_upstream(Path(__file__).resolve().parents[2])
+    up["hypothesis_engine"] = SimpleNamespace(
+        objective=fitting.make_objective(up["hypothesis_engine"].objective, "lm-bounded")
+    )
+    equation = compile_equation(
+        {
+            "equation": BASE.replace("m-pi", "m-pi*g"),
+            "initial": {"g": 2, "m": 0, "s": 0.35, "a2": 1, "b": 0.5, "a1": 4},
+        }
+    )
+    angles = np.tile(np.linspace(0, 2 * np.pi, 144, endpoint=False), (2, 1))
+    responses = np.asarray(equation.model(angles, 0.86, 0.6, 0.35, 2, 0.2, 3))
+    baseline = _measure(up, _baseline(up), (angles, responses), 2000)
+    offset = _measure(up, equation, (angles, responses), 2000, nested_offset=True)
+    assert offset["initialization"] == "fitted_double_gaussian"
+    assert offset["training_mse"] <= baseline["training_mse"] + 1e-7
+    assert offset["mse"] < baseline["mse"]
+
+
+def test_free_offset_accepts_roundoff_at_the_minimum_baseline_width():
+    up = import_upstream(Path(__file__).resolve().parents[2])
+    params = np.array([[5.5, 0.1, 1, 20, 0.01]], dtype=np.float32)
+
+    def objective(model, estimator, loss, x, y, **kwargs):
+        return None, None, 0.05, params
+
+    up["hypothesis_engine"] = SimpleNamespace(objective=objective)
+    equation = compile_equation(
+        {
+            "equation": BASE.replace("m-pi", "m-d"),
+            "initial": {"m": 0, "b": 0.1, "a1": 1, "a2": 1, "s": 0.1, "d": np.pi},
+        }
+    )
+    center = (5.5 + np.pi) % (2 * np.pi)
+    angles = np.linspace(center - 0.02, center + 0.02, 40, dtype=np.float32)[None, :]
+    responses = np.asarray(_baseline(up).model(angles, *params[0]))
+    offset = _measure(up, equation, (angles, responses), 2000, nested_offset=True)
+    assert offset["training_mse"] < 1e-7
 
 
 def test_draw_requires_a_complete_route_but_allows_alternatives():

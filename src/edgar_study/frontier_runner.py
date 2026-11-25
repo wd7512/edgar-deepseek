@@ -9,6 +9,8 @@ import math
 import operator
 from collections import Counter
 from dataclasses import asdict, dataclass
+from functools import partial
+from itertools import permutations
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +23,7 @@ from edgar_study.datasets import TRIAL_SEED, load_dataset, prepare
 from edgar_study.frontier_images import ParentFit, prepare_images
 from edgar_study.frontier_seed import BASE, BASELINE_ID, baseline_node
 from edgar_study.go_client import GoClient, Ledger, fetch_models, is_free, load_key
-from edgar_study.upstream import import_upstream, score_program
+from edgar_study.upstream import MSE_SCALE, PENALTY, import_upstream, score_program
 
 MODEL = "hy4-flash-free"
 LANES = {"frontier": 0.6, "detour": 0.3, "root": 0.1}
@@ -372,21 +374,86 @@ def _baseline(up):
     return ParentFit(BASELINE_ID, seeds.neuron_model_2_jax, seeds.parameter_estimator_2)
 
 
-def _measure(up, model, cohort, max_iter):
+def _trials(x):
+    order = jax.random.permutation(jax.random.PRNGKey(TRIAL_SEED), jnp.arange(x.shape[1]))
+    half = x.shape[1] // 2
+    return order[:half], order[half:]
+
+
+def _predictions(model, x, params):
+    return jax.vmap(model)(x, *params.T)
+
+
+def _offset_embedding(equation, baseline_model):
+    if len(equation.initial) != 6:
+        raise ValueError("Expected five baseline parameters and one free offset.")
+    probe = jnp.linspace(0, 2 * np.pi, 32, endpoint=False)
+    seeds = np.array([[0.73, 0.24, 2.1, 0.4, 0.38], [3.8, 0.36, 0.8, 1.7, 0.91]], dtype=np.float32)
+    target = _predictions(baseline_model, jnp.broadcast_to(probe, (len(seeds), probe.size)), seeds)
+    orders = np.array(list(permutations(range(6))))
+    for neutral in (0.0, np.pi, 1.0, -np.pi, -1.0, *equation.initial.values()):
+        params = np.column_stack((seeds, np.full(len(seeds), neutral, dtype=seeds.dtype)))[:, orders]
+        x = jnp.broadcast_to(probe, (params.shape[0] * params.shape[1], probe.size))
+        fit = _predictions(equation.model, x, params.reshape(-1, 6)).reshape(*params.shape[:2], probe.size)
+        matches = np.asarray(jnp.all(jnp.isclose(fit, target[:, None, :], rtol=2e-6, atol=2e-6), axis=(0, 2)))
+        if matches.any():
+            return orders[np.flatnonzero(matches)[0]], neutral
+    raise ValueError("Could not reproduce the double Gaussian at a neutral offset.")
+
+
+def _fit_offset(up, equation, cohort, max_iter, *, embedding=None):
+    baseline = _baseline(up)
+    order, neutral = _offset_embedding(equation, baseline.model) if embedding is None else embedding
     x, y = cohort
-    score, mse, count, params = score_program(up, model.model, model.estimator, x, y, max_iter)
+    base_score, _, _, base_params = score_program(up, baseline.model, baseline.estimator, x, y, max_iter)
+    if not math.isfinite(base_score):
+        raise ValueError("Could not fit the double Gaussian.")
+    lower = np.array([0, 0, 0, 0, 0.01, -np.inf])
+    upper = np.array([2 * np.pi, np.inf, np.inf, np.inf, np.inf, np.inf])
+    base_params = np.clip(np.asarray(base_params), lower[:5], upper[:5])
+    start = jnp.asarray(np.column_stack((base_params, np.full(len(base_params), neutral)))[:, order])
+    train, held = _trials(x)
+    xt, yt = x[:, train], y[:, train]
+    start_fit = _predictions(equation.model, xt, start)
+    base_fit = _predictions(baseline.model, xt, jnp.asarray(base_params))
+    if not np.allclose(start_fit, base_fit, rtol=3e-4, atol=3e-5):
+        raise ValueError("Offset start does not match the fitted double Gaussian.")
+    lo, hi = jnp.asarray(lower[order]), jnp.asarray(upper[order])
+
+    def bounded(theta, *params):
+        return equation.model(theta, *jnp.clip(jnp.stack(params), lo, hi))
+
+    fit = fitting.fit_lm_bounded(bounded, start, xt, yt, max_iterations=min(max_iter, fitting.LM_ITERATIONS))
+    fitted = jnp.clip(jnp.asarray(fit.params), lo, hi)
+    start_errors = jnp.mean((start_fit - yt) ** 2, axis=1)
+    fit_errors = jnp.mean((_predictions(equation.model, xt, fitted) - yt) ** 2, axis=1)
+    params = jnp.where((fit_errors < start_errors)[:, None], fitted, start)
+    mse = float(jnp.mean((_predictions(equation.model, x[:, held], params) - y[:, held]) ** 2))
+    count = start.shape[1]
+    return mse * MSE_SCALE + count * PENALTY, mse, count, params
+
+
+def _measure(up, model, cohort, max_iter, *, nested_offset=False, embedding=None):
+    x, y = cohort
+    if nested_offset:
+        score, mse, count, params = _fit_offset(up, model, cohort, max_iter, embedding=embedding)
+    else:
+        score, mse, count, params = score_program(up, model.model, model.estimator, x, y, max_iter)
     if not math.isfinite(score):
         raise ValueError("Nonfinite fit.")
-    held = jax.random.permutation(jax.random.PRNGKey(TRIAL_SEED), jnp.arange(x.shape[1]))[x.shape[1] // 2 :]
+    train, held = _trials(x)
     angles = x[:, held]
-    fitted = jax.vmap(model.model)(angles, *params.T)
+    fitted = _predictions(model.model, angles, params)
     errors = np.asarray((fitted - y[:, held]) ** 2)
-    if not np.isfinite(errors).all():
+    training_mse = float(jnp.mean((_predictions(model.model, x[:, train], params) - y[:, train]) ** 2))
+    if not math.isfinite(training_mse) or not np.isfinite(errors).all():
         raise ValueError("Nonfinite predictions.")
     bins = np.floor((np.rad2deg(np.asarray(angles)) % 360) / 30).astype(int)
     return {
         "score": score,
         "mse": mse,
+        "training_mse": training_mse,
+        "initialization": "fitted_double_gaussian" if nested_offset else "estimator",
         "parameters": count,
         "angle_mse": [float(errors[bins == i].mean()) if (bins == i).any() else None for i in range(12)],
     }
@@ -453,6 +520,7 @@ async def execute(
     wave: dict[str, Any] = {
         "version": 3,
         "seed": seed,
+        "fit_protocol": "nested_offset_v1",
         "idea_catalog": [asdict(i) for i in ideas],
         "graph": [baseline_node()],
         "planned_batches": batches * waves,
@@ -463,7 +531,7 @@ async def execute(
     config = {"batches": batches, "waves": waves, "k": k, "max_iter": max_iter, "finalize": final is not None}
     if resume:
         saved = json.loads(path.read_text())
-        fields = ("version", "seed", "idea_catalog", "planned_batches")
+        fields = ("version", "seed", "idea_catalog", "planned_batches", "fit_protocol")
         if any(saved.get(key) != json.loads(json.dumps(wave[key])) for key in fields):
             raise ValueError("Run checkpoint does not match this frontier configuration.")
         if saved.get("config", config) != config:
@@ -499,6 +567,25 @@ async def execute(
     if "baseline_exploration" not in wave:
         wave["baseline_exploration"] = _measure(up, _baseline(up), explore, max_iter)
 
+    embeddings = {}
+
+    def embedding(node, equation):
+        if nodes[node].mechanism != "offset" or nodes[node].routes:
+            return None
+        if equation.key not in embeddings:
+            embeddings[equation.key] = _offset_embedding(equation, _baseline(up).model)
+        return embeddings[equation.key]
+
+    def measure_node(node, equation, cohort):
+        start = embedding(node, equation)
+        return _measure(up, equation, cohort, max_iter, nested_offset=start is not None, embedding=start)
+
+    def reference_fit(node):
+        candidate = references[node]
+        start = embedding(node, candidate)
+        solve = partial(_fit_offset, up, candidate, embedding=start) if start is not None else None
+        return ParentFit(node, candidate.model, candidate.estimator, solve)
+
     def evaluate(proposal, event, step, duplicates, *, retry=False):
         node, parents = event["node"], event["parents"]
         idea = nodes[node]
@@ -523,7 +610,7 @@ async def execute(
             routes = idea.routes or (() if idea.lane == "root" else ((BASELINE_ID,),))
             wave["graph"].append({**asdict(idea), "routes": routes, "introduced_at": step + 1})
         try:
-            result = _measure(up, candidate, explore, max_iter)
+            result = measure_node(node, candidate, explore)
             record.update(status="fitted", metrics=result)
             depth[idea.branch] += 1
             if node not in references:
@@ -539,7 +626,7 @@ async def execute(
         node, parents = choice["node"], choice["parents"]
         idea = nodes[node]
         attempts[node] += 1
-        fitted = tuple(ParentFit(p, references[p].model, references[p].estimator) for p in parents)
+        fitted = tuple(reference_fit(p) for p in parents)
         prompt = _prompt(idea, parents, nodes, references, k)
         wave_number = step // batches
         event = {
@@ -616,7 +703,7 @@ async def execute(
     for node, eq in references.items():
         row = {"node": node}
         try:
-            result = _measure(up, eq, confirm, max_iter)
+            result = measure_node(node, eq, confirm)
             measured[node] = result
             comparators = {"double_gaussian": baseline, **{p: measured[p] for p in lineage[node]}}
             improved = all(
@@ -648,7 +735,7 @@ async def execute(
         scores = {"double_gaussian": _measure(up, _baseline(up), selection, max_iter)}
         for node in sorted(n for n in supported if supported_claim(n)):
             try:
-                scores[node] = _measure(up, references[node], selection, max_iter)
+                scores[node] = measure_node(node, references[node], selection)
             except ValueError:
                 continue
         winner = min(scores, key=lambda name: (scores[name]["score"], name))
@@ -657,7 +744,7 @@ async def execute(
         locked_baseline = _measure(up, _baseline(up), locked, max_iter)
         wave["locked"] = {"double_gaussian": locked_baseline}
         if winner != "double_gaussian":
-            wave["locked"][winner] = _measure(up, references[winner], locked, max_iter)
+            wave["locked"][winner] = measure_node(winner, references[winner], locked)
     wave["status"] = "complete"
     _write(path, wave)
     return json.loads(path.read_text())
