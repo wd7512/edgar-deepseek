@@ -346,7 +346,7 @@ def _idea_key(value):
 
 
 def _generated_idea(value, choice, existing):
-    fields = {"title": 64, "mechanism": 64, "change": 360}
+    fields = {"title": 64, "mechanism": 64, "change": 600}
     if not isinstance(value, dict):
         raise InvalidReply("invalid_idea", "Return an idea object with a title, mechanism, and change.")
     parts = {}
@@ -360,19 +360,23 @@ def _generated_idea(value, choice, existing):
     parents = tuple(choice["parents"])
     routes = ((*parents,),) if parents else ()
     mechanism = _idea_key(parts["mechanism"]).replace(" ", "-")
-    for idea in existing.values():
-        if idea.routes == routes and (
-            mechanism == idea.mechanism
-            or _idea_key(parts["title"]) == _idea_key(idea.label)
-            or _idea_key(parts["change"]) == _idea_key(idea.text)
+    same_route = [idea for idea in existing.values() if idea.routes == routes]
+    for idea in same_route:
+        if _idea_key(parts["title"]) == _idea_key(idea.label) or _idea_key(parts["change"]) == _idea_key(
+            idea.text
         ):
-            raise InvalidReply("duplicate_idea", f"This repeats the idea {idea.node} on the same route.")
+            titles = ", ".join(sorted(idea.label for idea in same_route))
+            raise InvalidReply(
+                "duplicate_idea",
+                f"This repeats the idea {idea.node} on the same route. Choose a materially different change."
+                f" Existing ideas on this route: {titles}.",
+            )
     return Idea(
         choice["node"], choice["mode"], mechanism, parts["change"], routes, choice["lane"], parts["title"]
     )
 
 
-def _generated_prompt(choice, nodes, references, k):
+def _generated_prompt(choice, nodes, references, k, tried=()):
     selected = choice["node"]
     if choice["kind"] == "revisit":
         idea = nodes[selected]
@@ -380,6 +384,8 @@ def _generated_prompt(choice, nodes, references, k):
             f"Revisit {idea.label}: {idea.text}. Keep the same idea and give new implementations. "
             f"Return only a JSON array with zero to {k} equation objects."
         )
+        if tried:
+            task += f" Already tried for this idea (do not repeat): {json.dumps(list(tried))}."
     else:
         mode = choice["mode"]
         brief = {
@@ -396,9 +402,10 @@ def _generated_prompt(choice, nodes, references, k):
         task = (
             f"{brief} Existing ideas on this route (avoid repeats): {json.dumps(known)}. "
             "Return only a JSON object with 'idea' and 'equations'. "
-            "The idea has a short, concise 'title' you choose, a specific stable 'mechanism' key "
-            "(use 'offset' for a standalone change to the baseline's peak separation), "
-            f"and a concrete 'change'. Provide zero to {k} structurally distinct equations in 'equations'."
+            "The idea has a short, concise 'title' you choose and a concrete 'change'. "
+            "The 'mechanism' key must name the changed component, for example offset, width, amplitude, "
+            "centre, baseline, shape, kernel, or mixture. Use 'offset' only when changing peak separation. "
+            f"Provide zero to {k} structurally distinct equations in 'equations'."
         )
     parents = [
         f"{name}: {BASE}"
@@ -774,6 +781,7 @@ async def execute(
     references, metrics, attempts, depth, seen, exact = {}, {}, Counter(), Counter(), set(), {BASE}
     lineage = {}
     history: dict[str, list[bool]] = {}
+    tried: dict[str, list[str]] = {}
     rng = np.random.default_rng(seed)
     born = set()
     wave: dict[str, Any] = {
@@ -798,10 +806,18 @@ async def execute(
         return draw(ideas, references, attempts, rng, depth)
 
     def track_proposals(event):
-        if discovery and event["node"] in nodes:
+        if not discovery:
+            return
+        if event["node"] in nodes:
             history.setdefault(event["node"], []).extend(
                 row["status"] in {"duplicate", "invalid"} for row in event["candidates"]
             )
+        equations = tried.setdefault(event["node"], [])
+        for record in event["candidates"]:
+            equation = record.get("equation")
+            if equation and equation not in equations:
+                equations.append(equation)
+        del equations[:-8]
 
     if resume:
         saved = json.loads(path.read_text())
@@ -875,7 +891,7 @@ async def execute(
     def fit_strategy(node, equation, parents):
         mappings = []
         bounds = None
-        standalone_offset = nodes[node].mechanism == "offset" and tuple(parents) in {(), (BASELINE_ID,)}
+        standalone_offset = tuple(parents) in {(), (BASELINE_ID,)}
         supplied = equation.nesting if isinstance(equation.nesting, dict) else {}
         template = (
             _baseline_templates().get(equation.key) if len(equation.initial) > len(BASE_NAMES) else None
@@ -905,8 +921,11 @@ async def execute(
             if embed is not None:
                 mappings.append((fit, embed))
         if not mappings:
-            if standalone_offset:
-                start = _offset_embedding(equation, baseline_fit.model)
+            if standalone_offset and len(equation.initial) == 6:
+                try:
+                    start = _offset_embedding(equation, baseline_fit.model)
+                except ValueError:
+                    return None, "estimator"
                 return partial(_fit_offset, up, equation, embedding=start), "fitted_double_gaussian"
             return None, "estimator"
         source = (
@@ -985,7 +1004,7 @@ async def execute(
         attempts[node] += 1
         fitted = tuple(reference_fit(p) for p in parents)
         prompt = (
-            _generated_prompt(choice, nodes, references, k)
+            _generated_prompt(choice, nodes, references, k, tried.get(node, ()))
             if discovery
             else _prompt(idea, parents, nodes, references, k)
         )
@@ -1027,6 +1046,7 @@ async def execute(
             if rejected is not None:
                 reason, detail = rejected
                 targets.append({"position": position, "reason_code": reason, "detail": detail})
+        retried = unreadable is not None
         if unreadable is not None and batch is not None:
             instruction = (
                 f"{unreadable.code}: {unreadable} Return the entire reply again in the requested format."
@@ -1042,6 +1062,7 @@ async def execute(
                 for replacement in replacements:
                     evaluate(replacement, event, step, replacement=True)
         elif targets and batch is not None:
+            retried = True
             reasons = "\n".join(
                 f"- Proposal {target['position']}: {target['reason_code']} — {target['detail']}"
                 for target in targets
@@ -1061,6 +1082,26 @@ async def execute(
             else:
                 for replacement, target in zip(replacements, targets, strict=True):
                     evaluate(replacement, event, step, replaces=target["position"], replacement=True)
+        fitted_here = any(
+            record.get("status") == "fitted" for record in event["candidates"] if "status" in record
+        )
+        if batch is not None and not retried and not fitted_here:
+            instruction = (
+                "No equation from your last reply could be used. Return a fresh reply in the requested"
+                " format with materially different equations. Do not repeat earlier equations."
+            )
+            retry = event["retry"] = {"instruction": instruction, "reason_code": "no_usable_equation"}
+            try:
+                retry["reply"] = await proposer.retry(batch, prompt, event["reply"] or "", instruction)
+                if discovery and (event.get("idea") or event["kind"] == "revisit"):
+                    replacements = _equation_list(_decode_json(retry["reply"]), k, exact=False)
+                else:
+                    replacements = _decode(retry["reply"], k)
+            except ValueError as exc:
+                retry["error"] = str(exc)
+            else:
+                for replacement in replacements:
+                    evaluate(replacement, event, step, replacement=True)
         log.info("Frontier episode %s: %s (%s images)", step + 1, node, event.get("images"))
         del wave["active_probe"]
         track_proposals(event)
