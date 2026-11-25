@@ -28,7 +28,7 @@ Run in rolling waves. At the start of each exploratory episode, draw a lane: **6
 
 **HY4's only job is to turn a supplied idea or thread into a batch of equations.** The experimenter authors the fixed templates and initial idea descriptions. The harness resolves the draw to a prompt type and fills in the fields; HY4 does not see the draw probability, graph state, or previous evaluation. A thread is an ordered set of design ideas, not a claim that they have been confirmed. Do not merge incompatible routes as if both were true.
 
-### Prompt templates
+### Prompt templates (pilot v1)
 
 **Combination** — use for a frontier route with multiple compatible ideas or for a cross-branch detour. Keep this wording fixed:
 
@@ -84,7 +84,9 @@ Return each equation and its free-parameter definitions. Use different
 structures, not just different parameter values. Do not fit or rank them.
 ```
 
-The harness attaches observed discovery responses overlaid with the current fitted comparator, using a fixed or seeded cell sample. The comparator is the double Gaussian or the reference named by the selected node, not a model picked for having the best score. The overlay shows what the thread is meant to address; it does not compare or grade proposals. Do not send scalar or per-cell scores, rankings, win/loss labels, or prose summarizing previous candidate performance, even on follow-up calls.
+The harness draws **10 distinct exploration neurons uniformly without replacement**, using a recorded seed. Keep the same sample within a wave so different threads see the same cells. Each panel shows observed responses overlaid with the current fitted comparator, using readable axes and a compact legend. The comparator is the double Gaussian or the reference named by the selected node, not a model picked for having the best score. Keep the text to the idea or thread, `K`, and the equation/output constraints; let the plots carry the data. Do not send scalar or per-cell scores, rankings, win/loss labels, or prose summarizing previous candidate performance, even on follow-up calls.
+
+**Image transport:** OpenCode Go lists `hy4-flash-free` as accepting PNG, but the current project client sends at most one image. Before using 10 separate PNGs, run a free-only check against the same Go chat endpoint with distinct synthetic markers in 2 images, then in 10 images. Require the model to identify the markers in order, not just return HTTP 200. If the route cannot read 10 separate images reliably, send the same 10 panels as one readable contact sheet rather than reducing the neuron sample. No live multi-image limit has been verified.
 
 [Example attachment: four discovery neurons overlaid with the double-Gaussian fit](knowledge-frontier-discovery-example.png).
 
