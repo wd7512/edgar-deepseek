@@ -1,0 +1,1 @@
+Warm-start single-harmonic and explicitly nested offset proposals without relaxing offset bounds, accept differentiable real-valued cutoffs and compact combinations, and retry invalid proposals or unreadable replies once with deterministic reasons.
