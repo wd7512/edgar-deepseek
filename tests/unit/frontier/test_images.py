@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 from PIL import Image
 
-from edgar_study.frontier_images import ParentFit, prepare_images
+from edgar_study.frontier.images import ParentFit, prepare_images
 
 
 def test_same_sample_for_each_parent_and_root_fallback():

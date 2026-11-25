@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from textwrap import wrap
 from urllib.parse import parse_qs, urlsplit
 
-from edgar_study.frontier_seed import BASELINE_ID, baseline_node
+from edgar_study.frontier.seed import BASELINE_ID, baseline_node
 
 MODES = {
     "single_idea": "Single-idea frontier",

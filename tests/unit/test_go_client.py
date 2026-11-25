@@ -9,7 +9,7 @@ import types
 import httpx
 
 from edgar_study.engine import install
-from edgar_study.frontier_images import FrontierImages
+from edgar_study.frontier.images import FrontierImages
 from edgar_study.go_client import BudgetExhausted, GoClient, Ledger, role
 
 

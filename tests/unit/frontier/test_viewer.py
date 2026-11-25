@@ -1,4 +1,4 @@
-from edgar_study.frontier_viewer import render
+from edgar_study.frontier.viewer import render
 
 
 def test_replay_shows_alternative_routes_without_node_status_labels():
