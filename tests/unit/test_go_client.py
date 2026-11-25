@@ -117,15 +117,17 @@ def test_sends_eighty_images_with_one_prompt_in_order(tmp_path, monkeypatch):
         go = GoClient(tmp_path, Ledger(tmp_path / "spend.jsonl"), "test", ["hy4-flash-free"])
         await go.close()
         go._http = httpx.AsyncClient(
-            base_url="https://example.invalid", transport=fake_transport([ok("equations")], bodies)
+            base_url="https://example.invalid", transport=fake_transport([ok("equations"), ok("new")], bodies)
         )
         try:
             batch = FrontierImages(tuple(range(10)), ("a", "b", "c", "d"), images)
-            return await batch.submit(go, "Combine the ideas.")
+            reply = await batch.submit(go, "Combine the ideas.")
+            assert reply == "equations"
+            return await batch.submit(go, "Combine the ideas.", followup=(reply, "Suggest another equation."))
         finally:
             await go.close()
 
-    assert asyncio.run(run()) == "equations"
+    assert asyncio.run(run()) == "new"
     content = bodies[0]["messages"][0]["content"]
     assert bodies[0]["model"] == "hy4-flash-free"
     assert content[0] == {
@@ -134,8 +136,13 @@ def test_sends_eighty_images_with_one_prompt_in_order(tmp_path, monkeypatch):
         "\nEach neuron has two images: response and fit, then residuals by angle.",
     }
     assert [base64.b64decode(p["image_url"]["url"].split(",", 1)[1]) for p in content[1:]] == list(images)
-    row = json.loads((tmp_path / "api_calls.jsonl").read_text())
-    assert row["image_count"] == 80 and row["image"] is True
+    assert bodies[1]["messages"] == [
+        bodies[0]["messages"][0],
+        {"role": "assistant", "content": "equations"},
+        {"role": "user", "content": "Suggest another equation."},
+    ]
+    rows = [json.loads(line) for line in (tmp_path / "api_calls.jsonl").read_text().splitlines()]
+    assert all(row["image_count"] == 80 and row["image"] is True for row in rows)
 
 
 def client(directory, handler, max_concurrency=16):

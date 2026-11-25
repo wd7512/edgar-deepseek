@@ -209,6 +209,9 @@ def main():
         "frontier", parents=[dataset, upstream], help="Run a score-blind HY4 wave."
     )
     frontier.add_argument("--output", type=Path, required=True)
+    frontier.add_argument(
+        "--resume", action="store_true", help="Continue a checkpoint using the original options."
+    )
     frontier.add_argument("--seed", type=int, default=0)
     frontier.add_argument("--batches", type=int, default=6)
     frontier.add_argument("--waves", type=int, default=1)
