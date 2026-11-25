@@ -17,11 +17,11 @@ import numpy as np
 from edgar_study import fitting
 from edgar_study.datasets import TRIAL_SEED, load_dataset, prepare
 from edgar_study.frontier_images import ParentFit, prepare_images
+from edgar_study.frontier_seed import BASE, BASELINE_ID, baseline_node
 from edgar_study.go_client import GoClient, Ledger, fetch_models, is_free, load_key
 from edgar_study.upstream import import_upstream, score_program
 
 MODEL = "hy4-flash-free"
-BASE = "b + a1*exp(-0.5*(wrap(theta-m)/s)**2) + a2*exp(-0.5*(wrap(theta-m-pi)/s)**2)"
 LANES = {"frontier": 0.6, "detour": 0.3, "root": 0.1}
 OPS = {
     ast.Add: operator.add,
@@ -43,36 +43,82 @@ class Idea:
     text: str
     routes: tuple[tuple[str, ...], ...] = ()
     lane: str = "frontier"
+    label: str = ""
 
 
 DEFAULT_IDEAS = (
-    Idea("width", "flanks", "asymmetry", "Allow the main peak to have different widths on its two sides."),
-    Idea("tip", "peaks", "sharpness", "Allow a sharper or flatter peak tip without changing its direction."),
-    Idea("offset", "second_peak", "offset", "Let the second peak move away from the antipode."),
-    Idea("drift", "baseline", "drift", "Use a broad periodic baseline instead of a constant baseline."),
-    Idea("harmonic", "harmonics", "harmonic", "Build a full curve from circular harmonics.", lane="root"),
-    Idea("window", "windows", "window", "Build a full curve from smooth periodic windows.", lane="root"),
+    Idea(
+        "width",
+        "flanks",
+        "asymmetry",
+        "Give the main peak separate left and right widths; leave the second peak and baseline unchanged.",
+        label="Asymmetric main-peak widths",
+    ),
+    Idea(
+        "tip",
+        "peaks",
+        "sharpness",
+        "Free the exponent on the main peak's wrapped angular distance inside its exponential; "
+        "keep its center fixed to the same parameter and leave the second peak and baseline unchanged.",
+        label="Free the main-peak shape exponent",
+    ),
+    Idea(
+        "offset",
+        "second_peak",
+        "offset",
+        "Replace the fixed 180° separation with a fitted angular offset; keep both peak kernels and baseline.",
+        label="Free second peak from 180°",
+    ),
+    Idea(
+        "drift",
+        "baseline",
+        "drift",
+        "Add one full-turn sinusoid to the constant baseline; leave both peak kernels unchanged.",
+        label="Add one baseline harmonic",
+    ),
+    Idea(
+        "harmonic",
+        "harmonics",
+        "harmonic",
+        "Replace both localized peaks with a finite circular Fourier sum and a constant baseline.",
+        lane="root",
+        label="Replace peaks with a Fourier sum",
+    ),
+    Idea(
+        "window",
+        "windows",
+        "window",
+        "Replace both Gaussian kernels with periodic raised-cosine windows that are zero outside their support.",
+        lane="root",
+        label="Replace Gaussians with cosine windows",
+    ),
     Idea(
         "blend",
         "flanks",
         "blend",
-        "Try smooth mixing between two curve shapes rather than a hard switch.",
+        "Replace the main Gaussian with a smooth blend of two co-centered kernels to test for shoulders; "
+        "retain the second peak and constant baseline.",
         lane="detour",
+        label="Blend two co-centered main-peak kernels",
     ),
     Idea(
         "width-drift",
         "baseline",
         "interaction",
-        "Keep both changes while separating their parameters.",
+        "Combine separate left and right main-peak widths with one baseline harmonic; "
+        "keep their parameters independent and leave the second peak unchanged.",
         (("width", "drift"),),
         "detour",
+        "Asymmetric main-peak widths + baseline harmonic",
     ),
     Idea(
         "peak-pair",
         "peaks",
         "interaction",
-        "Combine flexible peak shape and peak placement.",
+        "Combine the main peak's free shape exponent with a fitted offset for the second peak; "
+        "leave the baseline and second peak kernel unchanged.",
         (("tip", "offset"),),
+        label="Main-peak shape exponent + second-peak offset",
     ),
 )
 
@@ -195,6 +241,8 @@ def validate_graph(ideas):
     nodes = {idea.node: idea for idea in ideas}
     if len(nodes) != len(ideas):
         raise ValueError("Duplicate idea IDs.")
+    if BASELINE_ID in nodes:
+        raise ValueError(f"{BASELINE_ID!r} is reserved for the starting equation.")
     active, complete = set(), set()
 
     def visit(node):
@@ -233,7 +281,7 @@ def draw(ideas, references, attempts, rng, depth=None):
     eligible = {}
     for idea in ideas:
         routes = [route for route in idea.routes or ((),) if all(parent in references for parent in route)]
-        if routes and not (idea.lane == "root" and attempts.get(idea.node)):
+        if routes:
             eligible[idea.node] = (idea, routes)
     if not eligible:
         return None
@@ -242,6 +290,8 @@ def draw(ideas, references, attempts, rng, depth=None):
         rng,
     )
     pool = [i for i, _ in eligible.values() if i.lane == lane]
+    if lane == "root":
+        pool = [i for i in pool if not attempts.get(i.node)] or pool
     branch, branch_p = _pick({i.branch: 1 / (1 + depth.get(i.branch, 0)) for i in pool}, rng)
     tried = Counter(i.mechanism for i in ideas if attempts.get(i.node))
     node, node_p = _pick(
@@ -268,6 +318,12 @@ def draw(ideas, references, attempts, rng, depth=None):
             {"node": i.node, "parents": list(route)} for i, routes in eligible.values() for route in routes
         ],
     }
+
+
+def _mode(idea, parents):
+    if parents:
+        return "combination"
+    return {"root": "independent_root", "detour": "anomaly_detour", "frontier": "single_idea"}[idea.lane]
 
 
 def _prompt(idea, parents, definitions, references, k):
@@ -301,7 +357,8 @@ def _prompt(idea, parents, definitions, references, k):
             " equations that test this idea, keeping other terms unchanged."
         )
     return (
-        brief + "\nUse theta in radians, periodic with period 2*pi. Use + - * / ** and "
+        brief + "\nDo not add an unrelated mechanism. Respect the stated fixed parts. "
+        "Use theta in radians, periodic with period 2*pi. Use + - * / ** and "
         "sin, cos, exp, tanh, abs, sqrt or wrap. Return only a JSON array of objects with "
         "'equation' (expression), 'initial' (parameter names mapped to numeric starting values), "
         "and 'parameters' (free parameter definitions). Do not fit or rank."
@@ -310,7 +367,7 @@ def _prompt(idea, parents, definitions, references, k):
 
 def _baseline(up):
     seeds = up["seed_programs"]
-    return ParentFit("double_gaussian", seeds.neuron_model_2_jax, seeds.parameter_estimator_2)
+    return ParentFit(BASELINE_ID, seeds.neuron_model_2_jax, seeds.parameter_estimator_2)
 
 
 def _measure(up, model, cohort, max_iter):
@@ -389,14 +446,19 @@ async def execute(
     references, metrics, attempts, depth, seen = {}, {}, Counter(), Counter(), set()
     lineage = {}
     rng = np.random.default_rng(seed)
+    born = set()
     wave = {
-        "version": 1,
+        "version": 3,
         "seed": seed,
-        "graph": [asdict(i) for i in ideas],
+        "idea_catalog": [asdict(i) for i in ideas],
+        "graph": [baseline_node()],
+        "planned_batches": batches * waves,
         "episodes": [],
         "confirmation": [],
         "status": "exploring",
     }
+    _write(path, wave)
+    wave["baseline_exploration"] = _measure(up, _baseline(up), explore, max_iter)
     for step in range(batches * waves):
         choice = draw(ideas, references, attempts, rng, depth)
         if choice is None:
@@ -409,12 +471,20 @@ async def execute(
         wave_number = step // batches
         event = {
             **choice,
+            "mode": _mode(idea, parents),
             "wave": wave_number + 1,
             "image_seed": seed + wave_number,
             "prompt": prompt,
             "candidates": [],
         }
-        wave["episodes"].append(event)
+        wave["active_probe"] = {
+            "batch": step + 1,
+            "node": node,
+            "label": idea.label or idea.text,
+            "lane": idea.lane,
+            "mode": event["mode"],
+        }
+        _write(path, wave)
         try:
             batch = prepare_images(up, *explore, seed=event["image_seed"], parents=fitted, max_iter=max_iter)
             event.update(cells=list(batch.cells), images=len(batch.images))
@@ -422,17 +492,25 @@ async def execute(
             proposals = _decode(event["reply"], k)
         except ValueError as exc:
             event["error"] = str(exc)
-            _write(path, wave)
-            continue
+            proposals = []
         for proposal in proposals:
             record = {"proposal": proposal}
             event["candidates"].append(record)
             try:
                 candidate = compile_equation(proposal)
-                if candidate.key in seen:
-                    record["status"] = "duplicate"
-                    continue
-                seen.add(candidate.key)
+            except (ValueError, KeyError, TypeError, FloatingPointError, OverflowError) as exc:
+                record.update(status="invalid", error=str(exc))
+                continue
+            record["equation"] = candidate.text
+            if candidate.key in seen:
+                record["status"] = "duplicate"
+                continue
+            seen.add(candidate.key)
+            if node not in born:
+                born.add(node)
+                routes = idea.routes or (() if idea.lane == "root" else ((BASELINE_ID,),))
+                wave["graph"].append({**asdict(idea), "routes": routes, "introduced_at": step + 1})
+            try:
                 result = _measure(up, candidate, explore, max_iter)
                 record.update(status="fitted", metrics=result)
                 depth[idea.branch] += 1
@@ -440,8 +518,10 @@ async def execute(
                     references[node], metrics[node] = candidate, result
                     lineage[node] = parents
             except (ValueError, KeyError, TypeError, FloatingPointError, OverflowError) as exc:
-                record.update(status="invalid", error=str(exc))
+                record.update(status="fit_failed", error=str(exc))
         log.info("Frontier episode %s: %s (%s images)", step + 1, node, event.get("images"))
+        del wave["active_probe"]
+        wave["episodes"].append(event)
         _write(path, wave)
     wave["shortlist"] = {
         node: {
@@ -489,7 +569,10 @@ async def execute(
     def supported_claim(node):
         return node in supported and all(supported_claim(parent) for parent in lineage[node])
 
-    wave["claims"] = {node: "supported_fit" if supported_claim(node) else "unresolved" for node in nodes}
+    wave["claims"] = {
+        row["node"]: "supported_fit" if supported_claim(row["node"]) else "unresolved"
+        for row in wave["graph"][1:]
+    }
     if final is not None and supported:
         selection, locked = final
         scores = {"double_gaussian": _measure(up, _baseline(up), selection, max_iter)}
@@ -532,6 +615,7 @@ def run(args):
                 text=row["text"],
                 routes=tuple(tuple(route) for route in row.get("routes", ())),
                 lane=row.get("lane", "frontier"),
+                label=row.get("label", ""),
             )
             for row in json.loads(args.graph.read_text())
         )
