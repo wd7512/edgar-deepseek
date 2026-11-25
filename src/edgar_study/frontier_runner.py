@@ -36,6 +36,10 @@ def _soft_cutoff(left, right):
     return jax.nn.sigmoid(20 * (right - left))
 
 
+def _soft_cutoff_reverse(left, right):
+    return _soft_cutoff(right, left)
+
+
 OPS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -43,7 +47,11 @@ OPS = {
     ast.Div: operator.truediv,
     ast.Pow: operator.pow,
     ast.Lt: _soft_cutoff,
+    ast.LtE: _soft_cutoff,
+    ast.Gt: _soft_cutoff_reverse,
+    ast.GtE: _soft_cutoff_reverse,
 }
+CUTOFFS = (ast.Lt, ast.LtE, ast.Gt, ast.GtE)
 FUNCTIONS = {name: getattr(jnp, name) for name in ("sin", "cos", "exp", "tanh", "abs", "sqrt")}
 FUNCTIONS["wrap"] = lambda x: jnp.arctan2(jnp.sin(x), jnp.cos(x))
 log = logging.getLogger(__name__)
@@ -106,20 +114,25 @@ def compile_equation(proposal):
         raise InvalidEquation("invalid_syntax", "Equation is not a valid expression.") from exc
     except RecursionError as exc:
         raise InvalidEquation("equation_too_complex", "Equation is nested too deeply.") from exc
-    if sum(1 for _ in ast.walk(expr)) > 180:
+    if sum(1 for _ in ast.walk(expr)) > 260:
         raise InvalidEquation("equation_too_complex", "Equation exceeds the expression complexity limit.")
     used = set()
 
     def build(node):
         if isinstance(node, ast.Constant) and type(node.value) in (float, int) and -100 <= node.value <= 100:
             return ("number", float(node.value))
-        if isinstance(node, ast.Name) and node.id in {"pi", "theta", *initial}:
+        if isinstance(node, ast.Name):
+            if node.id not in {"pi", "theta", *initial}:
+                raise InvalidEquation(
+                    "unknown_name",
+                    f"Undefined name {node.id!r}; declare it in initial or use theta, pi and the declared parameters.",
+                )
             used.add(node.id)
             return ("name", node.id)
         if isinstance(node, ast.BinOp) and type(node.op) in OPS:
             return (type(node.op), build(node.left), build(node.right))
-        if isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], ast.Lt):
-            return (ast.Lt, build(node.left), build(node.comparators[0]))
+        if isinstance(node, ast.Compare) and len(node.ops) == 1 and type(node.ops[0]) in CUTOFFS:
+            return (type(node.ops[0]), build(node.left), build(node.comparators[0]))
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
             return ("neg", build(node.operand)) if isinstance(node.op, ast.USub) else build(node.operand)
         if (
@@ -346,20 +359,26 @@ def _idea_key(value):
 
 
 def _generated_idea(value, choice, existing):
-    fields = {"title": 64, "mechanism": 64, "change": 600}
     if not isinstance(value, dict):
         raise InvalidReply("invalid_idea", "Return an idea object with a title, mechanism, and change.")
     parts = {}
-    for field, limit in fields.items():
+    for field, limit in (("title", 64), ("change", 600)):
         text = value.get(field)
         if not isinstance(text, str) or not _idea_key(text) or len(text.strip()) > limit:
             raise InvalidReply(
                 "invalid_idea", f"Idea {field} must be nonempty and at most {limit} characters."
             )
         parts[field] = " ".join(text.split())
+    mechanism_text = value.get("mechanism") or parts["title"]
+    if (
+        not isinstance(mechanism_text, str)
+        or not _idea_key(mechanism_text)
+        or len(mechanism_text.strip()) > 64
+    ):
+        raise InvalidReply("invalid_idea", "Idea mechanism must be nonempty and at most 64 characters.")
     parents = tuple(choice["parents"])
     routes = ((*parents,),) if parents else ()
-    mechanism = _idea_key(parts["mechanism"]).replace(" ", "-")
+    mechanism = _idea_key(mechanism_text).replace(" ", "-")
     same_route = [idea for idea in existing.values() if idea.routes == routes]
     for idea in same_route:
         if _idea_key(parts["title"]) == _idea_key(idea.label) or _idea_key(parts["change"]) == _idea_key(
@@ -403,8 +422,8 @@ def _generated_prompt(choice, nodes, references, k, tried=()):
             f"{brief} Existing ideas on this route (avoid repeats): {json.dumps(known)}. "
             "Return only a JSON object with 'idea' and 'equations'. "
             "The idea has a short, concise 'title' you choose and a concrete 'change'. "
-            "The 'mechanism' key must name the changed component, for example offset, width, amplitude, "
-            "centre, baseline, shape, kernel, or mixture. Use 'offset' only when changing peak separation. "
+            "The optional 'mechanism' names the changed component, for example offset, width, amplitude, "
+            "centre, baseline, shape, kernel, or mixture; it defaults to the title. "
             f"Provide zero to {k} structurally distinct equations in 'equations'."
         )
     parents = [
@@ -416,7 +435,8 @@ def _generated_prompt(choice, nodes, references, k, tried=()):
     return (
         f"{task}\nSelected parents: {json.dumps(parents)}.\n"
         "Use theta in radians, periodic with period 2*pi. Use + - * / **, "
-        "sin, cos, exp, tanh, abs, sqrt, wrap, or a smooth cutoff (x < limit). "
+        "sin, cos, exp, tanh, abs, sqrt, wrap, or a smooth cutoff using <, <=, >, or >=. "
+        "Declare every symbol you use except theta and pi in 'initial'. "
         "Each equation object has 'equation', 'initial' (parameter names to numeric starts), and "
         "'parameters' (definitions). Optionally include 'nesting': parent ID to a map from each new "
         "parameter to a parent parameter name, a number, or [parent parameter name, scale, shift]. "
@@ -463,8 +483,8 @@ def _prompt(idea, parents, definitions, references, k):
     return (
         brief + "\nDo not add an unrelated mechanism. Respect the stated fixed parts. "
         "Use theta in radians, periodic with period 2*pi. Use + - * / ** and "
-        "sin, cos, exp, tanh, abs, sqrt or wrap. A comparison (x < limit) gives a smooth cutoff:"
-        " sigmoid(20*(limit-x))."
+        "sin, cos, exp, tanh, abs, sqrt or wrap. Comparisons with <, <=, >, or >= give smooth cutoffs."
+        " Declare every symbol except theta and pi in initial."
         " Keep expressions short. Return only a JSON array of objects with "
         "'equation' (expression), 'initial' (parameter names mapped to numeric starting values), "
         "and 'parameters' (free parameter definitions). If a simpler equation is an exact special case,"
