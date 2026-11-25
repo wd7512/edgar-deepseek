@@ -9,7 +9,7 @@ import math
 import operator
 from collections import Counter
 from dataclasses import asdict, dataclass
-from functools import partial
+from functools import cache, partial
 from itertools import permutations
 from pathlib import Path
 from typing import Any
@@ -134,6 +134,8 @@ class Equation:
     key: str
     model: object
     estimator: object
+    canonical_names: tuple[str, ...]
+    nesting: object
 
 
 def compile_equation(proposal):
@@ -237,7 +239,8 @@ def compile_equation(proposal):
         a, b = np.asarray(model(grid, *params)), np.asarray(model(grid + 2 * jnp.pi, *params))
         if not np.isfinite(a).all() or not np.allclose(a, b, atol=2e-4, rtol=2e-4):
             raise ValueError("Equation failed the finite periodicity probe.")
-    return Equation(text, dict(initial), repr(canonical(tree)), model, estimator)
+    key = repr(canonical(tree))
+    return Equation(text, dict(initial), key, model, estimator, tuple(seen), proposal.get("nesting"))
 
 
 def validate_graph(ideas):
@@ -365,7 +368,10 @@ def _prompt(idea, parents, definitions, references, k):
         "Use theta in radians, periodic with period 2*pi. Use + - * / ** and "
         "sin, cos, exp, tanh, abs, sqrt or wrap. Return only a JSON array of objects with "
         "'equation' (expression), 'initial' (parameter names mapped to numeric starting values), "
-        "and 'parameters' (free parameter definitions). Do not fit or rank."
+        "and 'parameters' (free parameter definitions). If a simpler equation is an exact special case,"
+        " optionally include 'nesting': an object keyed by the parent idea ID (or 'double_gaussian' for the base)."
+        " Each value maps every new equation parameter to a parent parameter name, a numeric constant, or"
+        " [parent parameter name, scale, shift] meaning scale * parent + shift. Do not fit or rank."
     )
 
 
@@ -382,6 +388,88 @@ def _trials(x):
 
 def _predictions(model, x, params):
     return jax.vmap(model)(x, *params.T)
+
+
+BASE_NAMES = ("m", "b", "a1", "a2", "s")
+BASE_LOWER = (0, 0, 0, 0, 0.01)
+BASE_UPPER = (2 * np.pi, np.inf, np.inf, np.inf, np.inf)
+BASE_PROBES = ((0.73, 0.24, 2.1, 0.4, 0.38), (3.8, 0.36, 0.8, 1.7, 0.91), (5.1, 1.4, 1.2, 2.4, 0.22))
+
+
+@cache
+def _baseline_templates():
+    shared: dict[str, Any] = {name: name for name in BASE_NAMES}
+    templates = []
+    for power, neutral in (
+        ("abs(wrap(theta-m))**p/s**p", 2),
+        ("(abs(wrap(theta-m))/s)**p", 2),
+        ("abs(wrap(theta-m)/s)**p", 2),
+        ("(wrap(theta-m)**2/(s**2))**p", 1),
+    ):
+        templates.append((BASE.replace("(wrap(theta-m)/s)**2", power), {**shared, "p": neutral}))
+    for term, extra in (
+        ("cc*cos(theta) + ss*sin(theta)", {"cc": 0, "ss": 0}),
+        ("ss*sin(theta) + cc*cos(theta)", {"cc": 0, "ss": 0}),
+        ("c*cos(theta-phi)", {"c": 0, "phi": 0}),
+        ("c*cos(wrap(theta-phi))", {"c": 0, "phi": 0}),
+        ("c*sin(theta-phi)", {"c": 0, "phi": 0}),
+        ("c*tanh(k*cos(theta-phi))", {"c": 0, "phi": 0, "k": 1}),
+    ):
+        templates.extend(
+            (text, {**shared, **extra})
+            for text in (BASE + " + " + term, BASE.replace("b + ", "b + " + term + " + ", 1))
+        )
+    templates.append((BASE.replace("b + ", "b*(1+k*cos(theta-phi)) + ", 1), {**shared, "k": 0, "phi": 0}))
+    first = "exp(-0.5*(wrap(theta-m)/s)**2)"
+    shoulder = "exp(-0.5*(wrap(theta-m)/t)**2)"
+    second = "a2*exp(-0.5*(wrap(theta-q)/u)**2)"
+    independent = {**shared, "t": ["s", 2, 0], "u": "s", "q": ["m", 1, np.pi]}
+    templates.extend(
+        (
+            (f"b + a1*{first} + c*{shoulder} + {second}", {**independent, "c": 0}),
+            (f"b + a1*((1-w)*{first} + w*{shoulder}) + {second}", {**independent, "w": 0}),
+        )
+    )
+    result = {}
+    for text, bindings in templates:
+        template = compile_equation({"equation": text, "initial": dict.fromkeys(bindings, 0.8)})
+        result[template.key] = tuple(bindings[name] for name in template.canonical_names)
+    return result
+
+
+def _map_parameters(params, indices, scales, shifts):
+    return jnp.asarray(params)[:, indices] * scales + shifts
+
+
+def _verified_mapping(equation, parent, parent_names, probes, bindings):
+    if not isinstance(bindings, dict) or bindings.keys() != equation.initial.keys():
+        return None
+    indices, scales, shifts = [], [], []
+    for value in (bindings[name] for name in equation.initial):
+        if type(value) in (float, int) and -100 <= value <= 100:
+            name, scale, shift = parent_names[0], 0, value
+        elif isinstance(value, str):
+            name, scale, shift = value, 1, 0
+        elif isinstance(value, list) and len(value) == 3:
+            name, scale, shift = value
+        else:
+            return None
+        if name not in parent_names or any(
+            type(v) not in (int, float) or not -100 <= v <= 100 for v in (scale, shift)
+        ):
+            return None
+        indices.append(parent_names.index(name))
+        scales.append(scale)
+        shifts.append(shift)
+    embed = partial(
+        _map_parameters, indices=np.array(indices), scales=np.array(scales), shifts=np.array(shifts)
+    )
+    grid = jnp.broadcast_to(jnp.linspace(0.007, 2 * np.pi + 0.007, 72, endpoint=False), (len(probes), 72))
+    expected = _predictions(parent.model, grid, jnp.asarray(probes, dtype=grid.dtype))
+    actual = _predictions(equation.model, grid, embed(jnp.asarray(probes, dtype=grid.dtype)))
+    if np.isfinite(expected).all() and np.allclose(actual, expected, rtol=2e-5, atol=3e-6):
+        return embed
+    return None
 
 
 def _offset_embedding(equation, baseline_model):
@@ -401,42 +489,85 @@ def _offset_embedding(equation, baseline_model):
     raise ValueError("Could not reproduce the double Gaussian at a neutral offset.")
 
 
-def _fit_offset(up, equation, cohort, max_iter, *, embedding=None):
-    baseline = _baseline(up)
-    order, neutral = _offset_embedding(equation, baseline.model) if embedding is None else embedding
+def _fit_from_starts(equation, cohort, max_iter, starts, *, bounds=None):
     x, y = cohort
-    base_score, _, _, base_params = score_program(up, baseline.model, baseline.estimator, x, y, max_iter)
-    if not math.isfinite(base_score):
-        raise ValueError("Could not fit the double Gaussian.")
-    lower = np.array([0, 0, 0, 0, 0.01, -np.inf])
-    upper = np.array([2 * np.pi, np.inf, np.inf, np.inf, np.inf, np.inf])
-    base_params = np.clip(np.asarray(base_params), lower[:5], upper[:5])
-    start = jnp.asarray(np.column_stack((base_params, np.full(len(base_params), neutral)))[:, order])
     train, held = _trials(x)
     xt, yt = x[:, train], y[:, train]
-    start_fit = _predictions(equation.model, xt, start)
-    base_fit = _predictions(baseline.model, xt, jnp.asarray(base_params))
-    if not np.allclose(start_fit, base_fit, rtol=3e-4, atol=3e-5):
-        raise ValueError("Offset start does not match the fitted double Gaussian.")
-    lo, hi = jnp.asarray(lower[order]), jnp.asarray(upper[order])
+
+    def errors(params):
+        return jnp.mean((_predictions(equation.model, xt, params) - yt) ** 2, axis=1)
+
+    def project(params):
+        return jnp.clip(params, *bounds) if bounds is not None else params
 
     def bounded(theta, *params):
-        return equation.model(theta, *jnp.clip(jnp.stack(params), lo, hi))
+        return equation.model(theta, *project(jnp.stack(params)))
 
-    fit = fitting.fit_lm_bounded(bounded, start, xt, yt, max_iterations=min(max_iter, fitting.LM_ITERATIONS))
-    fitted = jnp.clip(jnp.asarray(fit.params), lo, hi)
-    start_errors = jnp.mean((start_fit - yt) ** 2, axis=1)
-    fit_errors = jnp.mean((_predictions(equation.model, xt, fitted) - yt) ** 2, axis=1)
-    params = jnp.where((fit_errors < start_errors)[:, None], fitted, start)
+    params = None
+    for start, inherited in starts:
+        if not np.allclose(_predictions(equation.model, xt, start), inherited, rtol=3e-4, atol=3e-5):
+            raise ValueError("Nested start does not match the fitted parent on training angles.")
+        if params is None:
+            params = start
+        else:
+            params = jnp.where((errors(start) < errors(params))[:, None], start, params)
+        fit = fitting.fit_lm_bounded(
+            bounded, start, xt, yt, max_iterations=min(max_iter, fitting.LM_ITERATIONS)
+        )
+        fitted = project(jnp.asarray(fit.params))
+        fit_errors = errors(fitted)
+        params = jnp.where(
+            (jnp.isfinite(fit_errors) & (fit_errors < errors(params)))[:, None], fitted, params
+        )
+    if params is None:
+        raise ValueError("No nested start available.")
     mse = float(jnp.mean((_predictions(equation.model, x[:, held], params) - y[:, held]) ** 2))
-    count = start.shape[1]
+    count = params.shape[1]
     return mse * MSE_SCALE + count * PENALTY, mse, count, params
 
 
-def _measure(up, model, cohort, max_iter, *, nested_offset=False, embedding=None):
+def _parent_start(up, parent, embed, cohort, max_iter):
+    x, y = cohort
+    if parent.solve is None:
+        score, _, _, params = score_program(up, parent.model, parent.estimator, x, y, max_iter)
+    else:
+        score, _, _, params = parent.solve(cohort, max_iter)
+    if not math.isfinite(score):
+        raise ValueError(f"Could not fit {parent.node_id}.")
+    params = jnp.asarray(params)
+    if parent.node_id == BASELINE_ID:
+        params = jnp.clip(params, jnp.asarray(BASE_LOWER), jnp.asarray(BASE_UPPER))
+    train, _ = _trials(x)
+    return embed(params), _predictions(parent.model, x[:, train], params)
+
+
+def _fit_nested(up, equation, cohort, max_iter, *, mappings):
+    starts = (_parent_start(up, parent, embed, cohort, max_iter) for parent, embed in mappings)
+    return _fit_from_starts(equation, cohort, max_iter, starts)
+
+
+def _fit_offset(up, equation, cohort, max_iter, *, embedding=None):
+    baseline = _baseline(up)
+    order, neutral = _offset_embedding(equation, baseline.model) if embedding is None else embedding
+    embed = partial(
+        _map_parameters,
+        indices=np.minimum(order, 4),
+        scales=order != 5,
+        shifts=np.where(order == 5, neutral, 0),
+    )
+    start = _parent_start(up, baseline, embed, cohort, max_iter)
+    lo = jnp.asarray((*BASE_LOWER, -np.inf))[order]
+    hi = jnp.asarray((*BASE_UPPER, np.inf))[order]
+    return _fit_from_starts(equation, cohort, max_iter, (start,), bounds=(lo, hi))
+
+
+def _measure(up, model, cohort, max_iter, *, nested_offset=False, solve=None, initialization="estimator"):
     x, y = cohort
     if nested_offset:
-        score, mse, count, params = _fit_offset(up, model, cohort, max_iter, embedding=embedding)
+        solve = partial(_fit_offset, up, model)
+        initialization = "fitted_double_gaussian"
+    if solve is not None:
+        score, mse, count, params = solve(cohort, max_iter)
     else:
         score, mse, count, params = score_program(up, model.model, model.estimator, x, y, max_iter)
     if not math.isfinite(score):
@@ -453,7 +584,7 @@ def _measure(up, model, cohort, max_iter, *, nested_offset=False, embedding=None
         "score": score,
         "mse": mse,
         "training_mse": training_mse,
-        "initialization": "fitted_double_gaussian" if nested_offset else "estimator",
+        "initialization": initialization,
         "parameters": count,
         "angle_mse": [float(errors[bins == i].mean()) if (bins == i).any() else None for i in range(12)],
     }
@@ -520,7 +651,7 @@ async def execute(
     wave: dict[str, Any] = {
         "version": 3,
         "seed": seed,
-        "fit_protocol": "nested_offset_v1",
+        "fit_protocol": "nested_parent_v1",
         "idea_catalog": [asdict(i) for i in ideas],
         "graph": [baseline_node()],
         "planned_batches": batches * waves,
@@ -567,24 +698,55 @@ async def execute(
     if "baseline_exploration" not in wave:
         wave["baseline_exploration"] = _measure(up, _baseline(up), explore, max_iter)
 
-    embeddings = {}
+    baseline_fit = _baseline(up)
 
-    def embedding(node, equation):
-        if nodes[node].mechanism != "offset" or nodes[node].routes:
-            return None
-        if equation.key not in embeddings:
-            embeddings[equation.key] = _offset_embedding(equation, _baseline(up).model)
-        return embeddings[equation.key]
-
-    def measure_node(node, equation, cohort):
-        start = embedding(node, equation)
-        return _measure(up, equation, cohort, max_iter, nested_offset=start is not None, embedding=start)
-
+    @cache
     def reference_fit(node):
         candidate = references[node]
-        start = embedding(node, candidate)
-        solve = partial(_fit_offset, up, candidate, embedding=start) if start is not None else None
+        solve, _ = fit_strategy(node, candidate, tuple(lineage[node]))
         return ParentFit(node, candidate.model, candidate.estimator, solve)
+
+    def fit_strategy(node, equation, parents):
+        if nodes[node].mechanism == "offset" and not nodes[node].routes:
+            start = _offset_embedding(equation, baseline_fit.model)
+            return partial(_fit_offset, up, equation, embedding=start), "fitted_double_gaussian"
+        mappings = []
+        supplied = equation.nesting if isinstance(equation.nesting, dict) else {}
+        template = (
+            _baseline_templates().get(equation.key) if len(equation.initial) > len(BASE_NAMES) else None
+        )
+        if template is not None or BASELINE_ID in supplied:
+            bindings = (
+                dict(zip(equation.canonical_names, template, strict=True))
+                if template is not None
+                else supplied[BASELINE_ID]
+            )
+            embed = _verified_mapping(equation, baseline_fit, BASE_NAMES, BASE_PROBES, bindings)
+            if embed is not None:
+                mappings.append((baseline_fit, embed))
+        for name in parents:
+            parent = references[name]
+            if name not in supplied or len(equation.initial) <= len(parent.initial):
+                continue
+            initial = np.array(tuple(parent.initial.values()))
+            perturb = np.random.default_rng(0).uniform(-0.3, 0.3, size=(4, len(initial)))
+            probes = np.concatenate((initial[None, :], initial + perturb * (0.2 + np.abs(initial))))
+            fit = reference_fit(name)
+            embed = _verified_mapping(equation, fit, tuple(parent.initial), probes, supplied[name])
+            if embed is not None:
+                mappings.append((fit, embed))
+        if not mappings:
+            return None, "estimator"
+        source = (
+            "fitted_parent"
+            if any(parent.node_id != BASELINE_ID for parent, _ in mappings)
+            else "fitted_double_gaussian"
+        )
+        return partial(_fit_nested, up, equation, mappings=tuple(mappings)), source
+
+    def measure_node(node, equation, cohort, *, parents=None):
+        solve, source = fit_strategy(node, equation, tuple(lineage[node] if parents is None else parents))
+        return _measure(up, equation, cohort, max_iter, solve=solve, initialization=source)
 
     def evaluate(proposal, event, step, duplicates, *, retry=False):
         node, parents = event["node"], event["parents"]
@@ -610,7 +772,7 @@ async def execute(
             routes = idea.routes or (() if idea.lane == "root" else ((BASELINE_ID,),))
             wave["graph"].append({**asdict(idea), "routes": routes, "introduced_at": step + 1})
         try:
-            result = measure_node(node, candidate, explore)
+            result = measure_node(node, candidate, explore, parents=parents)
             record.update(status="fitted", metrics=result)
             depth[idea.branch] += 1
             if node not in references:
