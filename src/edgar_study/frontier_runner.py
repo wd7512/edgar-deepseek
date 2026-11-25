@@ -525,7 +525,14 @@ def run(args):
     ideas = DEFAULT_IDEAS
     if args.graph is not None:
         ideas = tuple(
-            Idea(**{**row, "routes": tuple(tuple(route) for route in row.get("routes", ()))})
+            Idea(
+                node=row["node"],
+                branch=row["branch"],
+                mechanism=row["mechanism"],
+                text=row["text"],
+                routes=tuple(tuple(route) for route in row.get("routes", ())),
+                lane=row.get("lane", "frontier"),
+            )
             for row in json.loads(args.graph.read_text())
         )
     validate_graph(ideas)
