@@ -16,7 +16,7 @@ from edgar_study.frontier.viewer import render
 from edgar_study.upstream import import_upstream
 
 
-def test_invalid_and_exact_duplicate_proposals_share_one_score_blind_retry(tmp_path):
+def test_every_proposal_that_cannot_be_used_is_reported_back_and_replaced_without_scores(tmp_path):
     up = import_upstream(Path(__file__).resolve().parents[3])
     angles = np.tile(np.linspace(0, 2 * np.pi, 48, endpoint=False, dtype=np.float32), (10, 1))
     responses = 1 + 0.4 * np.cos(angles)
@@ -30,13 +30,18 @@ def test_invalid_and_exact_duplicate_proposals_share_one_score_blind_retry(tmp_p
             {"equation": "a*exp(60*sin(theta)) + b", "initial": {"b": 7, "a": 1}},
         ]
     )
+    harmonic = [{"equation": f"b + a*cos({n}*theta)", "initial": {"b": 1, "a": 1}} for n in (2, 3, 4)]
+    replies = [
+        json.dumps([invalid, *harmonic]),
+        json.dumps([{"equation": "b + a*sin(theta)", "initial": {"b": 1, "a": 1}}]),
+    ]
 
     class Stub:
         async def submit(self, batch, prompt):
             return reply
 
-        async def retry(self, batch, prompt, previous_reply, instruction):
-            return json.dumps([invalid, {"equation": "b + a*cos(2*theta)", "initial": {"b": 1, "a": 1}}])
+        async def retry(self, batch, prompt, history):
+            return replies.pop(0)
 
     result = asyncio.run(
         execute(
@@ -51,12 +56,14 @@ def test_invalid_and_exact_duplicate_proposals_share_one_score_blind_retry(tmp_p
         )
     )
     event = result["episodes"][0]
-    instruction = event["retry"]["instruction"]
-    assert BASE in instruction
-    assert "unsupported_operator" in instruction
-    assert "proposal 3" in instruction.lower()
-    assert "exactly 2 replacements" in instruction
-    assert all(word not in instruction.lower() for word in ("score", "mse", "nonfinite fit"))
+    first, second = (turn["instruction"] for turn in event["turns"])
+    assert BASE in first
+    assert "Proposal 3: unsupported_operator" in first
+    assert "Proposal 4: duplicate" in first
+    assert "Proposal 5: fit_failed" in first
+    assert "exactly 4 replacement" in first
+    assert "Proposal 2: unsupported_operator" in second
+    assert all(word not in (first + second).lower() for word in ("score", "mse", "loss"))
     assert [row["status"] for row in event["candidates"]] == [
         "fitted",
         "duplicate",
@@ -65,12 +72,13 @@ def test_invalid_and_exact_duplicate_proposals_share_one_score_blind_retry(tmp_p
         "fit_failed",
         "invalid",
         "fitted",
+        "fitted",
+        "fitted",
+        "fitted",
     ]
-    assert [row["reason_code"] for row in event["candidates"] if row["status"] == "invalid"] == [
-        "unsupported_operator",
-        "unsupported_operator",
-    ]
-    assert [row["replaces"] for row in event["candidates"] if row.get("source") == "retry"] == [2, 3]
+    retried = [row for row in event["candidates"] if row.get("source") == "retry"]
+    assert [(row["replaces"], row["turn"]) for row in retried] == [(2, 1), (3, 1), (4, 1), (5, 1), (2, 2)]
+    assert event["ended"] == "done"
 
 
 @pytest.mark.parametrize(
@@ -81,7 +89,7 @@ def test_invalid_and_exact_duplicate_proposals_share_one_score_blind_retry(tmp_p
         ('[{"initial":{"b":NaN}}]', "nonfinite_reply_number"),
     ],
 )
-def test_unreadable_reply_can_be_replaced_once(tmp_path, reply, reason):
+def test_an_unreadable_reply_is_asked_for_again_with_its_reason(tmp_path, reply, reason):
     up = import_upstream(Path(__file__).resolve().parents[3])
     angles = np.tile(np.linspace(0, 2 * np.pi, 48, endpoint=False), (10, 1))
     responses = 2 + np.cos(angles)
@@ -90,7 +98,7 @@ def test_unreadable_reply_can_be_replaced_once(tmp_path, reply, reason):
         async def submit(self, batch, prompt):
             return reply
 
-        async def retry(self, batch, prompt, previous_reply, instruction):
+        async def retry(self, batch, prompt, history):
             return '[{"equation":"b+a*cos(theta)","initial":{"b":2,"a":1}}]'
 
     run = asyncio.run(
@@ -107,7 +115,7 @@ def test_unreadable_reply_can_be_replaced_once(tmp_path, reply, reason):
         )
     )
     event = run["episodes"][0]
-    assert event["retry"]["reason_code"] == reason
+    assert event["turns"][0]["kind"] == "unreadable" and reason in event["turns"][0]["instruction"]
     assert event["candidates"][0]["status"] == "fitted"
     assert event["candidates"][0]["source"] == "retry"
 
@@ -138,8 +146,8 @@ def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):
             snapshots.append(json.loads((tmp_path / "wave.json").read_text()))
             return reply(1 if len(seen) == 3 else len(seen))
 
-        async def retry(self, batch, prompt, previous_reply, instruction):
-            retry_inputs.append((batch.count, prompt, previous_reply, instruction))
+        async def retry(self, batch, prompt, history):
+            retry_inputs.append((batch.count, prompt, *history[-1]))
             return reply(3)
 
     stub = Stub()
@@ -171,7 +179,7 @@ def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):
     assert len(partial["episodes"]) == 2 and partial["active_probe"]["batch"] == 3
     result = run(resume=True)
     assert result["episodes"][:2] == partial["episodes"]
-    assert retry_inputs == [(40, seen[2][1], reply(1), result["episodes"][2]["retry"]["instruction"])]
+    assert retry_inputs == [(40, seen[2][1], reply(1), result["episodes"][2]["turns"][0]["instruction"])]
     assert "b + a*cos(1*theta)" in retry_inputs[0][3]
     assert "score" not in retry_inputs[0][3].lower()
     assert [row["status"] for row in result["episodes"][2]["candidates"]] == ["duplicate", "fitted"]
@@ -181,7 +189,7 @@ def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):
     assert all("score" not in prompt.lower() for _, prompt in seen)
     assert seen[2][1].startswith("Combine the ideas in this thread:")
     assert "Do not add an unrelated mechanism" in seen[2][1]
-    assert result["version"] == 3
+    assert result["version"] == 4
     assert result["baseline_exploration"]["score"] > 0
     assert [row["node"] for row in snapshots[0]["graph"]] == ["double_gaussian"]
     assert [row["node"] for row in snapshots[2]["graph"]] == [
@@ -200,7 +208,7 @@ def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):
     assert json.loads((tmp_path / "wave.json").read_text()) == result
 
 
-def test_unusable_probe_gets_one_retry_even_when_equations_only_fail_to_fit(tmp_path):
+def test_an_equation_that_cannot_be_fitted_is_reported_back_and_replaced(tmp_path):
     up = import_upstream(Path(__file__).resolve().parents[3])
     angles = np.tile(np.linspace(0, 2 * np.pi, 48, endpoint=False), (10, 1))
     responses = 2 + np.cos(angles)
@@ -215,8 +223,8 @@ def test_unusable_probe_gets_one_retry_even_when_equations_only_fail_to_fit(tmp_
                 }
             )
 
-        async def retry(self, batch, prompt, previous_reply, instruction):
-            calls.append(instruction)
+        async def retry(self, batch, prompt, history):
+            calls.append(history[-1][1])
             return '[{"equation":"b+a*sin(theta+phi)","initial":{"b":2,"a":1,"phi":0}}]'
 
     result = asyncio.run(
@@ -224,7 +232,7 @@ def test_unusable_probe_gets_one_retry_even_when_equations_only_fail_to_fit(tmp_
     )
     event = result["episodes"][0]
     assert len(calls) == 1
-    assert event["retry"]["reason_code"] == "no_usable_equation"
+    assert event["turns"][0]["kind"] == "replace" and "fit_failed" in calls[0]
     assert [row["status"] for row in event["candidates"]] == ["fit_failed", "fitted"]
     assert "score" not in calls[0].lower()
 
@@ -249,7 +257,7 @@ def test_generated_idea_is_visible_without_equations_and_can_be_revisited_after_
                 raise InterruptedError
             return json.dumps([proposal])
 
-        async def retry(self, batch, prompt, previous_reply, instruction):
+        async def retry(self, batch, prompt, history):
             return "[]"
 
     def run():
@@ -309,7 +317,7 @@ def test_generated_idea_is_visible_during_equation_retry(tmp_path):
                 }
             )
 
-        async def retry(self, batch, prompt, previous_reply, instruction):
+        async def retry(self, batch, prompt, history):
             snapshots.append(json.loads((tmp_path / "wave.json").read_text()))
             return '[{"equation":"b+a*cos(theta)","initial":{"b":2,"a":1}}]'
 
@@ -319,7 +327,7 @@ def test_generated_idea_is_visible_during_equation_retry(tmp_path):
     assert 'data-node="idea-1"' not in render(snapshots[0], 0)
     event = result["episodes"][0]
     assert [row["status"] for row in event["candidates"]] == ["invalid", "fitted"]
-    assert event["retry"]["targets"][0]["reason_code"] == "unsupported_operator"
+    assert "unsupported_operator" in event["turns"][0]["instruction"]
     assert result["graph"][1]["label"] == "Circular shoulder"
 
 
@@ -360,8 +368,8 @@ class Scripted:
         }
         return json.dumps({"idea": idea, "equations": [equation]})
 
-    async def retry(self, batch, prompt, previous_reply, instruction):
-        self.prompts.append(instruction)
+    async def retry(self, batch, prompt, history):
+        self.prompts.append(history[-1][1])
         return "[]"
 
 
@@ -444,7 +452,7 @@ def test_a_run_with_no_fitted_equation_reports_it_and_stops(tmp_path):
         async def submit(self, batch, prompt):
             return json.dumps({"idea": {"title": "Nothing", "change": "Nothing."}, "equations": []})
 
-        async def retry(self, batch, prompt, previous_reply, instruction):
+        async def retry(self, batch, prompt, history):
             return "[]"
 
     result = asyncio.run(
@@ -519,7 +527,7 @@ def test_a_fixed_catalog_run_only_probes_ideas_whose_routes_are_fitted(tmp_path)
         async def submit(self, batch, prompt):
             return json.dumps([{"equation": "b + a*cos(theta)", "initial": {"b": 2, "a": 1}}])
 
-        async def retry(self, batch, prompt, previous_reply, instruction):
+        async def retry(self, batch, prompt, history):
             return "[]"
 
     result = asyncio.run(
@@ -550,6 +558,7 @@ def args(output, **overrides):
         "batches": 1,
         "k": 1,
         "starts": 4,
+        "patience": 3,
         "seed": 0,
         "graph": None,
         "new_probability": 0.8,
@@ -578,7 +587,8 @@ def test_a_new_run_refuses_an_existing_output_directory(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "overrides", [{"waves": 0}, {"batches": 0}, {"k": 0}, {"seed": -1}, {"new_probability": 2}]
+    "overrides",
+    [{"waves": 0}, {"batches": 0}, {"k": 0}, {"seed": -1}, {"new_probability": 2}, {"patience": -1}],
 )
 def test_run_rejects_unusable_options_before_touching_the_network(tmp_path, overrides):
     with pytest.raises(SystemExit):
@@ -615,7 +625,7 @@ def test_a_child_that_contains_its_parent_is_never_fitted_worse_than_the_parent(
         async def submit(self, batch, prompt):
             return json.dumps([child if "Add a sine term" in prompt else parent])
 
-        async def retry(self, batch, prompt, previous_reply, instruction):
+        async def retry(self, batch, prompt, history):
             return "[]"
 
     result = asyncio.run(
@@ -640,3 +650,41 @@ def test_a_child_that_contains_its_parent_is_never_fitted_worse_than_the_parent(
     assert {"base", "child"} <= set(fitted)
     assert fitted["child"]["training_mse"] <= fitted["base"]["training_mse"] + 1e-9
     assert fitted["child"]["mse"] <= fitted["base"]["mse"] + 1e-9
+
+
+def test_the_model_can_check_equations_before_answering_and_only_its_answer_is_fitted(tmp_path):
+    x, y = cohort()
+    statement = {"equation": "y = b + a*cos(theta)", "initial": {"b": 2, "a": 1}}
+    good = {"equation": "b + a*cos(theta)", "initial": {"b": 2, "a": 1}}
+    histories = []
+
+    class Stub:
+        async def submit(self, batch, prompt):
+            return json.dumps({"check": [statement, good]})
+
+        async def retry(self, batch, prompt, history):
+            histories.append(history)
+            return json.dumps([good])
+
+    result = asyncio.run(
+        execute(
+            import_upstream(ROOT),
+            Stub(),
+            (x, y),
+            (x, y),
+            tmp_path,
+            ideas=(Idea("a", "peak", "harmonic", "Try a harmonic."),),
+            batches=1,
+            k=1,
+            max_iter=0,
+            patience=2,
+        )
+    )
+    event = result["episodes"][0]
+    report = event["turns"][0]["instruction"]
+    assert event["turns"][0]["kind"] == "check"
+    assert "Equation 1: cannot be used: invalid_syntax" in report
+    assert "Equation 2: usable." in report
+    assert [(row["status"], row["turn"]) for row in event["candidates"]] == [("fitted", 1)]
+    assert len(histories) == 1 and result["config"]["patience"] == 2
+    assert '{"check": [' in event["prompt"] and "2 follow-up turns" in event["prompt"]

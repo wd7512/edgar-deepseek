@@ -124,7 +124,8 @@ def test_sends_eighty_images_with_one_prompt_in_order(tmp_path, monkeypatch):
             batch = FrontierImages(tuple(range(10)), ("a", "b", "c", "d"), images)
             reply = await batch.submit(go, "Combine the ideas.")
             assert reply == "equations"
-            return await batch.submit(go, "Combine the ideas.", followup=(reply, "Suggest another equation."))
+            history = [(reply, "Suggest another equation."), ("more", "Check this one.")]
+            return await batch.submit(go, "Combine the ideas.", history=history)
         finally:
             await go.close()
 
@@ -141,6 +142,8 @@ def test_sends_eighty_images_with_one_prompt_in_order(tmp_path, monkeypatch):
         bodies[0]["messages"][0],
         {"role": "assistant", "content": "equations"},
         {"role": "user", "content": "Suggest another equation."},
+        {"role": "assistant", "content": "more"},
+        {"role": "user", "content": "Check this one."},
     ]
     rows = [json.loads(line) for line in (tmp_path / "api_calls.jsonl").read_text().splitlines()]
     assert all(row["image_count"] == 80 and row["image"] is True for row in rows)

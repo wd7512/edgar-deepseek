@@ -117,7 +117,7 @@ class GoClient:
         img_bytes=None,
         *,
         images=(),
-        followup=None,
+        history=(),
         **meta,
     ):
         """Return the reply text, or None on failure (upstream scores None as a failed program)."""
@@ -146,8 +146,7 @@ class GoClient:
             "messages": [{"role": "user", "content": content}],
             "max_tokens": self.max_tokens,
         }
-        if followup is not None:
-            previous_reply, instruction = followup
+        for previous_reply, instruction in history:
             body["messages"].extend(
                 [{"role": "assistant", "content": previous_reply}, {"role": "user", "content": instruction}]
             )

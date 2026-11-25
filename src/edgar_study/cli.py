@@ -226,6 +226,12 @@ def main():
         default=5,
         help="Starts per fit: the model's own, seeded jitters, and a warm start from the parent.",
     )
+    frontier.add_argument(
+        "--patience",
+        type=int,
+        default=3,
+        help="Follow-up turns per batch for the model to check equations and replace ones that fail.",
+    )
     frontier.add_argument("--finalize", action="store_true", help="Use selection and locked-test cells once.")
     frontier.set_defaults(func=lambda args: _load("frontier.runner", "run")(args))
 
