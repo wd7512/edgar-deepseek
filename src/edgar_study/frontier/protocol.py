@@ -6,6 +6,7 @@ are put in canonical order first, so equivalent equations get identical fits. He
 used to choose among starts.
 """
 
+import hashlib
 import math
 from typing import NamedTuple
 
@@ -18,6 +19,7 @@ from edgar_study.datasets import TRIAL_SEED
 from edgar_study.upstream import MSE_SCALE, PENALTY
 
 STARTS = 5
+JITTER = fitting.MULTISTART_SCALE
 
 
 class Fit(NamedTuple):
@@ -39,6 +41,26 @@ def predict(model, x, params):
     return jax.vmap(model)(x, *params.T)
 
 
+def jittered_starts(start, xt, yt, starts, seed, scale):
+    """The estimator start plus `starts - 1` jittered copies, each cell's jitter drawn from its own data.
+
+    A cell's starts then depend only on that cell and the seed, never on which other cells are fitted
+    with it or in what order.
+    """
+    n = start.shape[1]
+    noise = np.stack(
+        [
+            np.random.default_rng(
+                [seed, int.from_bytes(hashlib.sha256(xt[i].tobytes() + yt[i].tobytes()).digest()[:8], "big")]
+            ).standard_normal((starts - 1, n))
+            for i in range(len(start))
+        ],
+        axis=1,
+    )
+    jittered = start[None] + scale * noise * (np.abs(start)[None] + 1)
+    return np.concatenate([start[None], jittered.astype(start.dtype)])
+
+
 def fit_model(model, estimator, cohort, max_iter, *, starts=STARTS, seed=0, warm=None):
     """Fit `model` to every cell from its estimator's start plus seeded jitter; score on held-out trials.
 
@@ -49,7 +71,7 @@ def fit_model(model, estimator, cohort, max_iter, *, starts=STARTS, seed=0, warm
     train, held = split_trials(x)
     xt, yt = np.asarray(x)[:, train], np.asarray(y)[:, train]
     start = np.stack([np.asarray(estimator(xt[i], yt[i]), dtype=np.float32) for i in range(len(xt))])
-    candidates = fitting.perturbed_starts(start, starts, seed)
+    candidates = jittered_starts(start, xt, yt, starts, seed, JITTER)
     if warm is not None and starts > 1:
         warm = np.asarray(warm, dtype=candidates.dtype)
         if warm.shape != start.shape:

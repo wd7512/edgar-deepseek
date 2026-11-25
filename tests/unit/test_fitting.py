@@ -176,3 +176,33 @@ def test_a_supplied_start_can_be_chosen_per_cell():
     fit = fitting.fit_from_starts(_cosine, np.stack([start, good]), theta, y, max_iterations=0)
     assert np.all(fit.best_start == 1)
     np.testing.assert_allclose(fit.params, good)
+
+
+def _scaled_cosine(theta, phi, a):
+    import jax.numpy as jnp
+
+    return a * jnp.cos(theta - phi)
+
+
+def test_an_absolute_step_cap_cannot_reach_a_distant_amplitude_but_a_relative_cap_can():
+    theta = np.tile(np.linspace(0, 2 * np.pi, 72, endpoint=False, dtype=np.float32), (4, 1))
+    y = (60 * np.cos(theta - 1.0)).astype(np.float32)
+    start = np.tile(np.array([1.0, 2.0], dtype=np.float32), (4, 1))
+
+    absolute = fitting.fit_lm_bounded(_scaled_cosine, start, theta, y).params
+    relative = fitting.fit_lm_bounded(_scaled_cosine, start, theta, y, relative_step=True).params
+
+    def error(params):
+        return np.mean((np.asarray(_scaled_cosine(theta, params[:, :1], params[:, 1:])) - y) ** 2, axis=1)
+
+    assert np.all(error(absolute) > 100)
+    assert np.all(error(relative) < 1e-2)
+
+
+def test_the_relative_cap_leaves_small_parameters_with_the_same_step_cap_as_before():
+    theta, y, start = _cosine_cells()
+    start = np.zeros_like(start) + np.float32(0.1)
+    base = fitting.fit_lm_bounded(_cosine, start, theta, y, max_iterations=1).params
+    relative = fitting.fit_lm_bounded(_cosine, start, theta, y, max_iterations=1, relative_step=True).params
+    assert np.all(np.abs(base - start) <= 0.25 + 1e-6)
+    assert np.all(np.abs(relative - start) <= 0.25 * 1.1 + 1e-6)

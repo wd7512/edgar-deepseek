@@ -1,0 +1,1 @@
+Add stress tests for the frontier fitting protocol (equation families, cell independence, invalid-domain jitter, odd trial counts, scale) and an opt-in relative step cap, `relative_step`, in the bounded Levenberg–Marquardt fitter; the protocol does not use it yet.
