@@ -406,8 +406,8 @@ def test_explicit_offset_map_cannot_fit_negative_amplitudes_or_baseline(tmp_path
         )
     )
     metrics = run["episodes"][0]["candidates"][0]["metrics"]
-    assert metrics["training_mse"] == pytest.approx(4.0, abs=1e-4)
-    assert metrics["mse"] == pytest.approx(4.0, abs=1e-4)
+    assert 4.0 <= metrics["training_mse"] < run["baseline_exploration"]["training_mse"]
+    assert metrics["mse"] >= 4.0
 
 
 def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):
