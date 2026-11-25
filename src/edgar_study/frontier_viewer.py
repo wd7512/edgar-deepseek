@@ -297,7 +297,9 @@ def _metrics_line(metrics):
 
 def _metrics_detail(metrics):
     if metrics and "mse" in metrics and "parameters" in metrics:
-        return f"<p>Held-out MSE: {metrics['mse']:.6g} · Free parameters: {metrics['parameters']}</p>"
+        train = metrics.get("training_mse")
+        train_text = f" · Training MSE: {train:.6g}" if train is not None else ""
+        return f"<p>Held-out MSE: {metrics['mse']:.6g}{train_text} · Free parameters: {metrics['parameters']}</p>"
     return ""
 
 

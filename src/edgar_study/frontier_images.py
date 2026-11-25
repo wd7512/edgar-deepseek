@@ -22,6 +22,7 @@ class ParentFit:
     node_id: str
     model: Callable
     estimator: Callable
+    solve: Callable | None = None
 
 
 @dataclass(frozen=True)
@@ -113,7 +114,10 @@ def prepare_images(
         references = (ParentFit("root", seeds.neuron_model_2_jax, seeds.parameter_estimator_2),)
     images = []
     for parent in references:
-        score, _, _, params = score_program(upstream, parent.model, parent.estimator, x, y, max_iter)
+        if parent.solve is None:
+            score, _, _, params = score_program(upstream, parent.model, parent.estimator, x, y, max_iter)
+        else:
+            score, _, _, params = parent.solve((x, y), max_iter)
         if not np.isfinite(score):
             raise ValueError(f"Could not fit reference {parent.node_id!r}.")
         predict = jax.vmap(lambda row, p, model=parent.model: jnp.broadcast_to(model(row, *p), row.shape))
