@@ -86,7 +86,7 @@ structures, not just different parameter values. Do not fit or rank them.
 
 The harness draws **10 distinct exploration neurons uniformly without replacement**, using a recorded seed. Keep the same sample for every parent of the selected route and reuse the seed within a wave. For each parent, fit its reference equation to those neurons and render two PNGs per neuron: observed responses with the fitted curve, then residuals against stimulus angle (0–360°). Both plots label the reference **Fit**. A node with no parents uses the double Gaussian. Send every image in one request, ordered by parent and then neuron: **20 images** for a root or one parent, **80** for four parents. The text adds only what the pairs show and, for multiple parents, the order of the parent blocks. Do not send scalar or per-cell scores, rankings, win/loss labels, or prose summarizing previous candidate performance, even on follow-up calls.
 
-**Image transport:** A live free-only smoke test against OpenCode Go's OpenAI chat endpoint verified 2 and 10 separate PNG attachments at $0 list cost. The client now supports ordered multi-image requests, and an offline test checks the 80-image payload. Live acceptance at 20 or 80 images and interpretation of scientific plots are not yet verified. Build the batch with `frontier_images.prepare_images` using exploration-only arrays and the selected parent models and estimators, then call `batch.submit(go, prompt)`. The scheduler is not yet wired to this entry point.
+**Image transport:** Live smoke tests verified 2, 10, 20 and 80 separate synthetic attachments, and a request with 20 real plots returned four JSON equation proposals. The runner uses the successful real-plot settings (reasoning `none`, temperature 0.5, 8,192 output tokens). There is no fixed number of parents; provider acceptance beyond the tested attachment counts is unknown.
 
 [Example response charts](knowledge-frontier-inputs/) · [Example residual charts](knowledge-frontier-residuals/). These checked-in PNGs are for documentation only. The experiment renders its inputs from the wave's sampled discovery neurons and reference equations; it does not read or reuse the example files.
 
@@ -104,3 +104,17 @@ The exploratory loop can record **observations and hypotheses**, but cannot mark
 4. **Then run the free pilot.** Seed the map from a fixed discovery diagnostic panel and log every scheduling decision and update. Review after six four-equation batches, not as a claim deadline or a total cap. Continue while waves produce new contrasts or unresolved leads worth pursuing. The free model removes the token-cost constraint, not compute time, rate limits, or the risk of overfitting repeatedly viewed data. Freeze the shortlist and selection rule before opening selection cells; use the locked test once for the selected equation versus the double Gaussian. Report regional and full-curve fit and complexity separately.
 
 **Deliverables:** the versioned knowledge map, a readable graph of supported and unresolved claims, the test log, and a shortlist of equations with evidence for what each fixes. Pilot success means the map explains why tests were chosen, shallow branches receive attention regardless of early fit results, and the evidence supports or narrows claims. Finding a better equation is a result to report, not a condition for calling the pilot informative.
+
+## Running the pilot
+
+```sh
+JAX_PLATFORMS=cpu uv run edgar frontier \
+  --dataset data/gratings_drifting_GT1_2019_04_12_1.npy \
+  --output results/frontier/wave-1 --seed 17
+```
+
+This runs six batches of four proposals with the free model only. Use `--waves N` to run multiple six-batch waves with a fresh seeded diagnostic sample each wave and a single confirmation pass after the last wave. `--batches 1` is useful for a small smoke test. Use a new output directory per run. The built-in map can be replaced with `--graph` and a JSON array of objects with `node`, `branch`, `mechanism`, `text`, optional `lane` (`frontier`, `detour`, or `root`) and optional `routes` (array of prerequisite ID arrays). An independent root is an experimenter-supplied idea, not a request for HY4 to invent an idea.
+
+`manifest.json` records the partition and seed; `wave.json` records eligible draws, probabilities, prompts, sampled rows, proposals, and all fit outcomes. The first distinct equation that yields a finite fit at a node becomes its exploratory reference; having a reference can unlock a continuation but is not confirmation. The frozen shortlist is checked on untouched discovery neurons against the double Gaussian and every parent used in the selected route. “Supported fit” means the predeclared fit check passed, not that a biological mechanism has been established. Frozen hypotheses or confirmation data from repeated runs are not independent.
+
+By default, selection and locked-test cells are unused. Use `--finalize` only for the final predeclared run: pick among supported equations and the baseline on selection cells by penalized score, then evaluate the chosen equation and the baseline once on locked cells. Do not use locked-test results to tune a later wave. Runs do not resume from an existing audit directory.

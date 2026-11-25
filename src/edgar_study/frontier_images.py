@@ -30,12 +30,16 @@ class FrontierImages:
     parent_ids: tuple[str, ...]
     images: tuple[bytes, ...]
 
-    async def submit(self, client: GoClient, prompt: str) -> str | None:
+    async def submit(
+        self, client: GoClient, prompt: str, *, effort: str | None = None, temperature: float | None = None
+    ) -> str | None:
         """Submit the prompt and all parent/neuron image pairs to HY4 Flash Free."""
         if len(self.parent_ids) > 1:
             prompt += "\nParent image blocks, in order: " + ", ".join(self.parent_ids) + "."
         prompt += "\nEach neuron has two images: response and fit, then residuals by angle."
-        return await client.chat("hy4-flash-free", prompt, images=self.images)
+        return await client.chat(
+            "hy4-flash-free", prompt, images=self.images, effort=effort, temperature=temperature
+        )
 
 
 def _plot(cell, degrees, values, grid, curve, *, residual):
