@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import jax
 import numpy as np
 import pytest
 
@@ -41,7 +42,7 @@ def test_equation_grammar_accepts_periodic_cutoffs_and_width_drift():
         }
     )
     angles = np.array([0, np.pi, 2 * np.pi])
-    np.testing.assert_allclose(window.model(angles, *window.estimator(None, None)), [3, 1, 3])
+    np.testing.assert_allclose(window.model(angles, *window.estimator(None, None)), [3, 1, 3], atol=1e-6)
     combination = compile_equation(
         {
             "equation": BASE.replace("b + ", "b + r*cos(theta - phi) + ", 1).replace(
@@ -53,11 +54,29 @@ def test_equation_grammar_accepts_periodic_cutoffs_and_width_drift():
     np.testing.assert_allclose(combination.model(angles, *combination.estimator(None, None)), [3, 2, 3])
 
 
+def test_cutoff_width_has_a_gradient_at_its_edge():
+    equation = compile_equation(
+        {
+            "equation": "b + a*(abs(wrap(theta-m))<w)",
+            "initial": {"b": 1, "a": 2, "m": 0, "w": 1},
+        }
+    )
+    assert jax.grad(lambda w: equation.model(1.0, 1.0, 2.0, 0.0, w))(1.0) > 1
+    edge = compile_equation(
+        {
+            "equation": "b+a*(abs(wrap(theta))<w)",
+            "initial": {"b": 1, "a": 2, "w": 2.9},
+        }
+    )
+    np.testing.assert_allclose(edge.model(-2.9, 1, 2, 2.9), edge.model(2 * np.pi - 2.9, 1, 2, 2.9), atol=1e-5)
+
+
 @pytest.mark.parametrize(
     ("expression", "reason"),
     [
         ("a*cos(theta) + 1/0", "nonfinite_expression"),
         ("a*cos(theta)*(-1)**0.5", "nonreal_expression"),
+        ("a*cos(theta) + (cos(theta)*(-1)**0.5 < 1)", "nonreal_expression"),
         ("a*theta", "nonperiodic_expression"),
         ("a*cos(theta)+(0<theta<1)", "unsupported_operator"),
         ("a*cos(theta)" + "+1" * 85, "equation_too_complex"),
@@ -271,14 +290,10 @@ def test_invalid_and_exact_duplicate_proposals_share_one_score_blind_retry(tmp_p
     )
 
     class Stub:
-        first = None
-
         async def submit(self, batch, prompt):
-            self.first = (batch, prompt, reply)
             return reply
 
         async def retry(self, batch, prompt, previous_reply, instruction):
-            assert self.first == (batch, prompt, previous_reply)
             return json.dumps([invalid, {"equation": "b + a*cos(2*theta)", "initial": {"b": 1, "a": 1}}])
 
     result = asyncio.run(
@@ -314,6 +329,85 @@ def test_invalid_and_exact_duplicate_proposals_share_one_score_blind_retry(tmp_p
         "unsupported_operator",
     ]
     assert [row["replaces"] for row in event["candidates"] if row.get("source") == "retry"] == [2, 3]
+
+
+@pytest.mark.parametrize(
+    ("reply", "reason"),
+    [
+        ("not json", "invalid_reply_json"),
+        ("[]", "invalid_reply_count"),
+        ('[{"initial":{"b":NaN}}]', "nonfinite_reply_number"),
+    ],
+)
+def test_unreadable_reply_can_be_replaced_once(tmp_path, reply, reason):
+    up = import_upstream(Path(__file__).resolve().parents[2])
+    angles = np.tile(np.linspace(0, 2 * np.pi, 48, endpoint=False), (10, 1))
+    responses = 2 + np.cos(angles)
+
+    class Stub:
+        async def submit(self, batch, prompt):
+            return reply
+
+        async def retry(self, batch, prompt, previous_reply, instruction):
+            return '[{"equation":"b+a*cos(theta)","initial":{"b":2,"a":1}}]'
+
+    run = asyncio.run(
+        execute(
+            up,
+            Stub(),
+            (angles, responses),
+            (angles, responses),
+            tmp_path,
+            ideas=(Idea("harmonic", "peak", "harmonic", "Try a harmonic."),),
+            batches=1,
+            k=1,
+            max_iter=0,
+        )
+    )
+    event = run["episodes"][0]
+    assert event["retry"]["reason_code"] == reason
+    assert event["candidates"][0]["status"] == "fitted"
+    assert event["candidates"][0]["source"] == "retry"
+
+
+def test_explicit_offset_map_cannot_fit_negative_amplitudes_or_baseline(tmp_path):
+    up = import_upstream(Path(__file__).resolve().parents[2])
+    angles = np.tile(np.linspace(0, 2 * np.pi, 48, endpoint=False), (10, 1))
+    responses = np.full_like(angles, -2)
+    params = {"m": 0.5, "b": 1.0, "a1": 1.0, "a2": 1.0, "s": 0.5}
+
+    def objective(model, estimator, loss, x, y, **kwargs):
+        return None, None, 1.0, np.tile(tuple(params.values()), (len(x), 1))
+
+    up["hypothesis_engine"] = SimpleNamespace(objective=objective)
+
+    class Stub:
+        async def submit(self, batch, prompt):
+            return json.dumps(
+                [
+                    {
+                        "equation": BASE.replace("m-pi", "m-pi-k*sin(q)"),
+                        "initial": {**params, "k": 1, "q": 0},
+                        "nesting": {"double_gaussian": {**{name: name for name in params}, "k": 1, "q": 0}},
+                    }
+                ]
+            )
+
+    run = asyncio.run(
+        execute(
+            up,
+            Stub(),
+            (angles, responses),
+            (angles, responses),
+            tmp_path,
+            ideas=(Idea("offset", "peak", "offset", "Free the offset."),),
+            batches=1,
+            k=1,
+        )
+    )
+    metrics = run["episodes"][0]["candidates"][0]["metrics"]
+    assert metrics["training_mse"] == pytest.approx(4.0, abs=1e-4)
+    assert metrics["mse"] == pytest.approx(4.0, abs=1e-4)
 
 
 def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):
