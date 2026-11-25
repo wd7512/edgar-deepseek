@@ -7,15 +7,15 @@ import jax.numpy as jnp
 import numpy as np
 
 from edgar_study.frontier.images import ParentFit
-from edgar_study.frontier.protocol import predict, solve_model, split_trials
+from edgar_study.frontier.protocol import STARTS, predict, solve_model, split_trials
 from edgar_study.frontier.seed import BASELINE_ID
 
 
-def double_gaussian_parent(up):
+def double_gaussian_parent(up, starts=STARTS):
     """The starting equation, fitted under the same protocol as every candidate."""
     seeds = up["seed_programs"]
     model, estimator = seeds.neuron_model_2_jax, seeds.parameter_estimator_2
-    return ParentFit(BASELINE_ID, model, estimator, partial(solve_model, model, estimator))
+    return ParentFit(BASELINE_ID, model, estimator, partial(solve_model, model, estimator, starts=starts))
 
 
 def measure(model, solve, cohort, max_iter):

@@ -43,6 +43,7 @@ class Equation:
     model: object
     estimator: object
     canonical_names: tuple[str, ...]
+    nesting: object
 
 
 class InvalidEquation(ValueError):
@@ -186,4 +187,4 @@ def compile_equation(proposal):
         if not np.allclose(a, b, atol=2e-4, rtol=2e-4):
             raise InvalidEquation("nonperiodic_expression", "Equation failed the 2*pi periodicity probe.")
     key = repr(canonical(tree))
-    return Equation(text, dict(initial), key, model, estimator, tuple(seen))
+    return Equation(text, dict(initial), key, model, estimator, tuple(seen), proposal.get("nesting"))

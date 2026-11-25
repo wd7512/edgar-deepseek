@@ -48,7 +48,9 @@ def generated_prompt(choice, nodes, references, k, tried=()):
         "sin, cos, exp, tanh, abs, sqrt, wrap, or a smooth cutoff using <, <=, >, or >=. "
         "Declare every symbol you use except theta and pi in 'initial'. "
         "Each equation object has 'equation', 'initial' (parameter names to numeric starts), and "
-        "'parameters' (definitions). Do not fit or rank."
+        "'parameters' (definitions). Optionally include 'nesting': parent ID to a map from each new "
+        "parameter to a parent parameter name, a number, or [parent parameter name, scale, shift]. "
+        "For double_gaussian use parent parameter names m, b, a1, a2, s. Do not fit or rank."
     )
 
 
@@ -89,5 +91,8 @@ def idea_prompt(idea, parents, definitions, references, k):
         " Declare every symbol except theta and pi in initial."
         " Keep expressions short. Return only a JSON array of objects with "
         "'equation' (expression), 'initial' (parameter names mapped to numeric starting values), "
-        "and 'parameters' (free parameter definitions). Do not fit or rank."
+        "and 'parameters' (free parameter definitions). If a simpler equation is an exact special case,"
+        " optionally include 'nesting': an object keyed by the parent idea ID (or 'double_gaussian' for the base)."
+        " Each value maps every new equation parameter to a parent parameter name, a numeric constant, or"
+        " [parent parameter name, scale, shift] meaning scale * parent + shift. Do not fit or rank."
     )

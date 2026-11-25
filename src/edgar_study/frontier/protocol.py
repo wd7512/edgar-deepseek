@@ -17,7 +17,7 @@ from edgar_study import fitting
 from edgar_study.datasets import TRIAL_SEED
 from edgar_study.upstream import MSE_SCALE, PENALTY
 
-STARTS = 4
+STARTS = 5
 
 
 class Fit(NamedTuple):
@@ -39,20 +39,24 @@ def predict(model, x, params):
     return jax.vmap(model)(x, *params.T)
 
 
-def fit_model(model, estimator, cohort, max_iter, *, starts=STARTS, seed=0):
-    """Fit `model` to every cell from its estimator's start plus seeded jitter; score on held-out trials."""
+def fit_model(model, estimator, cohort, max_iter, *, starts=STARTS, seed=0, warm=None):
+    """Fit `model` to every cell from its estimator's start plus seeded jitter; score on held-out trials.
+
+    `warm` (cells, parameters), when given, replaces the last jittered start, so the other starts are the
+    same ones a cold fit with one fewer start would use. It is ignored when only one start is allowed.
+    """
     x, y = cohort
     train, held = split_trials(x)
     xt, yt = np.asarray(x)[:, train], np.asarray(y)[:, train]
     start = np.stack([np.asarray(estimator(xt[i], yt[i]), dtype=np.float32) for i in range(len(xt))])
-    fitted = fitting.fit_multistart(
-        model,
-        start,
-        xt,
-        yt,
-        starts=starts,
-        seed=seed,
-        max_iterations=min(max_iter, fitting.LM_ITERATIONS),
+    candidates = fitting.perturbed_starts(start, starts, seed)
+    if warm is not None and starts > 1:
+        warm = np.asarray(warm, dtype=candidates.dtype)
+        if warm.shape != start.shape:
+            raise ValueError(f"Warm start has shape {warm.shape}, expected {start.shape}.")
+        candidates[-1] = warm
+    fitted = fitting.fit_from_starts(
+        model, candidates, xt, yt, max_iterations=min(max_iter, fitting.LM_ITERATIONS)
     )
     params = jnp.asarray(fitted.params)
     count = int(params.shape[1])
@@ -84,8 +88,11 @@ def canonical(equation):
 def fit_equation(equation, cohort, max_iter, **options):
     """Fit a compiled equation under the shared protocol; parameters come back in its declared order."""
     model, estimator = canonical(equation)
-    result = fit_model(model, estimator, cohort, max_iter, **options)
     names = tuple(equation.initial)
+    warm = options.pop("warm", None)
+    if warm is not None:
+        warm = np.asarray(warm)[:, [names.index(name) for name in equation.canonical_names]]
+    result = fit_model(model, estimator, cohort, max_iter, warm=warm, **options)
     declared = [equation.canonical_names.index(name) for name in names]
     return result._replace(params=result.params[:, declared])
 

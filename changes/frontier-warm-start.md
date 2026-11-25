@@ -1,0 +1,1 @@
+Give every frontier fit five starts per neuron (`--starts`, default 5): the model's own start, three seeded jitters and a warm start from the parent, mapped by a verified `nesting` map or by matching parameter names (a fourth jitter when there is no parent). The `nesting` proposal field returns, and `fit_protocol` is now `warm_multistart_v1`.

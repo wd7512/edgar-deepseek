@@ -160,3 +160,19 @@ def test_multistart_logs_how_many_fits_hit_the_iteration_cap(caplog):
         fitting.fit_multistart(_cosine, start, theta, y, starts=3, max_iterations=1)
 
     assert any("of 18 fits stopped before the cap" in record.getMessage() for record in caplog.records)
+
+
+def test_explicit_starts_give_the_same_result_as_generated_starts():
+    theta, y, start = _cosine_cells()
+    generated = fitting.fit_multistart(_cosine, start, theta, y, starts=4, seed=3)
+    explicit = fitting.fit_from_starts(_cosine, fitting.perturbed_starts(start, 4, 3), theta, y)
+    np.testing.assert_array_equal(generated.params, explicit.params)
+    np.testing.assert_array_equal(generated.best_start, explicit.best_start)
+
+
+def test_a_supplied_start_can_be_chosen_per_cell():
+    theta, y, start = _cosine_cells()
+    good = np.tile(np.array([0.0, 1.0], dtype=np.float32), (6, 1))
+    fit = fitting.fit_from_starts(_cosine, np.stack([start, good]), theta, y, max_iterations=0)
+    assert np.all(fit.best_start == 1)
+    np.testing.assert_allclose(fit.params, good)

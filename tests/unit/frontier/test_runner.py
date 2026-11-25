@@ -587,9 +587,56 @@ def test_run_rejects_unusable_options_before_touching_the_network(tmp_path, over
 
 def test_the_number_of_starts_is_part_of_the_run_configuration(tmp_path):
     result, _ = explore(tmp_path, batches=1, starts=2)
-    assert result["fit_protocol"] == "cold_multistart_v1"
+    assert result["fit_protocol"] == "warm_multistart_v1"
     assert result["config"]["starts"] == 2
     with pytest.raises(ValueError):
         explore(tmp_path, batches=1, starts=3, resume=True)
     with pytest.raises(ValueError):
         explore(tmp_path / "none", batches=1, starts=0)
+
+
+def test_a_child_that_contains_its_parent_is_never_fitted_worse_than_the_parent(tmp_path):
+    ideas = (
+        Idea("base", "peak", "harmonic", "Use one harmonic."),
+        Idea("child", "peak", "sine", "Add a sine term.", (("base",),)),
+    )
+    x = np.tile(np.linspace(0, 2 * np.pi, 72, endpoint=False), (10, 1))
+    y = 0.3 + 2 * np.exp(-0.5 * (np.arctan2(np.sin(x - 3.5), np.cos(x - 3.5)) / 0.3) ** 2)
+    parent = {
+        "equation": "b + a*exp(-0.5*(wrap(theta-m)/s)**2)",
+        "initial": {"b": 0.3, "a": 1.5, "m": 3.3, "s": 0.4},
+    }
+    child = {
+        "equation": "b + a*exp(-0.5*(wrap(theta-m)/s)**2) + c*cos(theta)",
+        "initial": {"b": 0.3, "a": 1.5, "m": 0.2, "s": 0.3, "c": 0.0},
+    }
+
+    class Catalog:
+        async def submit(self, batch, prompt):
+            return json.dumps([child if "Add a sine term" in prompt else parent])
+
+        async def retry(self, batch, prompt, previous_reply, instruction):
+            return "[]"
+
+    result = asyncio.run(
+        execute(
+            import_upstream(Path(__file__).resolve().parents[3]),
+            Catalog(),
+            (x, y),
+            (x, y),
+            tmp_path,
+            ideas=ideas,
+            batches=4,
+            k=1,
+            max_iter=100,
+            starts=2,
+        )
+    )
+    fitted = {}
+    for event in result["episodes"]:
+        for record in event["candidates"]:
+            if record.get("status") == "fitted":
+                fitted.setdefault(event["node"], record["metrics"])
+    assert {"base", "child"} <= set(fitted)
+    assert fitted["child"]["training_mse"] <= fitted["base"]["training_mse"] + 1e-9
+    assert fitted["child"]["mse"] <= fitted["base"]["mse"] + 1e-9

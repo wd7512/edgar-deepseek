@@ -333,7 +333,20 @@ def fit_multistart(
     """Run `fit_lm_bounded` from `params` and `starts - 1` perturbed copies of it, all in one batch,
     and keep each cell's fit with the lowest squared error. The first start is `params` itself, so a
     cell never ends worse than a single bounded fit from the same start; ties go to it."""
-    candidates = perturbed_starts(params, starts, seed)
+    return fit_from_starts(
+        model,
+        perturbed_starts(params, starts, seed),
+        x,
+        y,
+        max_iterations=max_iterations,
+        tolerance=tolerance,
+    )
+
+
+def fit_from_starts(model, candidates, x, y, max_iterations=LM_ITERATIONS, tolerance=LM_BOUNDED_TOLERANCE):
+    """Fit from every start in `candidates` (starts, cells, parameters) and keep each cell's lowest-error
+    fit; ties go to the earliest start."""
+    candidates = np.asarray(candidates)
     k, cells, n = candidates.shape
     x_all, y_all = np.tile(np.asarray(x), (k, 1)), np.tile(np.asarray(y), (k, 1))
     fit = fit_lm_bounded(

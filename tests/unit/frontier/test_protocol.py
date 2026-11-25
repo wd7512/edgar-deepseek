@@ -133,4 +133,44 @@ def test_an_equation_that_cannot_fit_is_reported_not_silently_scored():
 
 
 def test_the_default_number_of_starts_is_a_documented_constant():
-    assert STARTS == 4
+    assert STARTS == 5
+
+
+def test_a_warm_start_takes_the_last_slot_and_never_leaves_the_fit_worse_than_the_cold_starts():
+    cohort = double_gaussian_cohort()
+    cold = fit_equation(equation(), cohort, 100, starts=4)
+    poor = np.full((24, 5), 0.1, dtype=np.float32)
+    warm = fit_equation(equation(), cohort, 100, starts=5, warm=poor)
+    assert warm.training_mse <= cold.training_mse + 1e-9
+
+
+def test_a_warm_start_from_a_better_fit_is_used():
+    theta, y = double_gaussian_cohort()
+    first = fit_equation(equation(), (theta, y), 100, starts=1)
+    shifted = equation(initial={"m": 0.1, "b": 5.0, "a1": 0.1, "a2": 0.1, "s": 3.0})
+    cold = fit_equation(shifted, (theta, y), 100, starts=1)
+    seeded = fit_equation(shifted, (theta, y), 100, starts=2, warm=first.params)
+    assert seeded.training_mse <= first.training_mse + 1e-6
+    assert seeded.training_mse < cold.training_mse
+
+
+def test_a_warm_start_is_given_in_the_equations_declared_parameter_order():
+    cohort = double_gaussian_cohort(cells=4)
+    renamed = equation(BASE.replace("m", "mu"), {"s": 0.6, "mu": 3.0, "a1": 1.5, "a2": 1.0, "b": 0.3})
+    names = list(renamed.initial)
+    first = fit_equation(equation(), cohort, 100, starts=1)
+    reference = dict(zip(equation().initial, first.params.T, strict=True))
+    warm = np.stack([reference["m" if name == "mu" else name] for name in names], axis=1)
+    result = fit_equation(renamed, cohort, 0, starts=2, warm=warm)
+    assert result.training_mse == pytest.approx(first.training_mse, rel=1e-4)
+
+
+def test_a_warm_start_is_ignored_when_only_one_start_is_allowed_and_must_match_the_cells():
+    cohort = double_gaussian_cohort(cells=4)
+    nonsense = np.zeros((4, 5), dtype=np.float32)
+    assert (
+        fit_equation(equation(), cohort, 0, starts=1, warm=nonsense).params.tolist()
+        == fit_equation(equation(), cohort, 0, starts=1).params.tolist()
+    )
+    with pytest.raises(ValueError):
+        fit_equation(equation(), cohort, 0, starts=2, warm=np.zeros((3, 5), dtype=np.float32))
