@@ -9,7 +9,6 @@ import pytest
 
 from edgar_study import fitting
 from edgar_study.datasets import prepare, synthetic_recording
-from edgar_study.frontier.fits import double_gaussian_parent
 from edgar_study.frontier.ideas import Idea
 from edgar_study.frontier.runner import execute, run
 from edgar_study.frontier.seed import BASE
@@ -19,15 +18,8 @@ from edgar_study.upstream import import_upstream
 
 def test_invalid_and_exact_duplicate_proposals_share_one_score_blind_retry(tmp_path):
     up = import_upstream(Path(__file__).resolve().parents[3])
-    base = double_gaussian_parent(up)
     angles = np.tile(np.linspace(0, 2 * np.pi, 48, endpoint=False, dtype=np.float32), (10, 1))
     responses = 1 + 0.4 * np.cos(angles)
-
-    def objective(model, estimator, loss, x, y, **kwargs):
-        start = (0.7, 0.2, 2.5, 1.1, 0.6) if model is base.model else estimator(x[0], y[0])
-        return None, None, float("inf") if start[0] == 7 else 1.0, np.tile(start, (len(x), 1))
-
-    up["hypothesis_engine"] = SimpleNamespace(objective=objective)
     invalid = {"equation": "a*log(theta)", "initial": {"a": 1}}
     reply = json.dumps(
         [
@@ -35,7 +27,7 @@ def test_invalid_and_exact_duplicate_proposals_share_one_score_blind_retry(tmp_p
             {"equation": BASE, "initial": {"m": 0, "s": 1, "a1": 1, "b": 1, "a2": 1}},
             invalid,
             {"equation": "a*cos(theta) + b", "initial": {"a": 1, "b": 1}},
-            {"equation": "b + a*sin(theta)", "initial": {"b": 7, "a": 1}},
+            {"equation": "a*exp(60*sin(theta)) + b", "initial": {"b": 7, "a": 1}},
         ]
     )
 
@@ -214,20 +206,12 @@ def test_unusable_probe_gets_one_retry_even_when_equations_only_fail_to_fit(tmp_
     responses = 2 + np.cos(angles)
     calls = []
 
-    def objective(model, estimator, loss, x, y, **kwargs):
-        start = estimator(x[0], y[0])
-        if start[0] < 0:
-            return None, None, float("inf"), np.tile(np.array(start), (len(x), 1))
-        return None, None, 1.0, np.tile(np.array(start), (len(x), 1))
-
-    up["hypothesis_engine"] = SimpleNamespace(objective=objective)
-
     class Stub:
         async def submit(self, batch, prompt):
             return json.dumps(
                 {
                     "idea": {"title": "Harmonic", "mechanism": "harmonic", "change": "Add a cosine."},
-                    "equations": [{"equation": "b + a*cos(theta)", "initial": {"b": -1, "a": 1}}],
+                    "equations": [{"equation": "a*exp(60*sin(theta)) + b", "initial": {"b": 7, "a": 1}}],
                 }
             )
 
@@ -565,6 +549,7 @@ def args(output, **overrides):
         "waves": 1,
         "batches": 1,
         "k": 1,
+        "starts": 4,
         "seed": 0,
         "graph": None,
         "new_probability": 0.8,
@@ -598,3 +583,13 @@ def test_a_new_run_refuses_an_existing_output_directory(tmp_path):
 def test_run_rejects_unusable_options_before_touching_the_network(tmp_path, overrides):
     with pytest.raises(SystemExit):
         run(args(tmp_path / "out", **overrides))
+
+
+def test_the_number_of_starts_is_part_of_the_run_configuration(tmp_path):
+    result, _ = explore(tmp_path, batches=1, starts=2)
+    assert result["fit_protocol"] == "cold_multistart_v1"
+    assert result["config"]["starts"] == 2
+    with pytest.raises(ValueError):
+        explore(tmp_path, batches=1, starts=3, resume=True)
+    with pytest.raises(ValueError):
+        explore(tmp_path / "none", batches=1, starts=0)

@@ -1,0 +1,1 @@
+Fit every frontier equation from scratch under one shared protocol (`frontier.protocol`): each model's own start plus seeded jitter (`--starts`, default 4), training trials only, canonical parameter order. Parent-inherited warm starts and the `nesting` proposal field are removed.
