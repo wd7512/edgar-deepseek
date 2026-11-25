@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1100" height="1140" viewBox="0 0 1100 1140" role="img" aria-labelledby="title desc">
   <title id="title">The knowledge frontier</title>
-  <desc id="desc">Two alternative prerequisite bundles lead to a flank-width claim. The scheduler draws frontier, detour, or new independent root. For a frontier draw it first samples a branch by inverse evidence depth plus one, then samples an open, testable node by inverse prior attempts plus one. The example draws baseline drift, then shows three possible nodes and their conditional probabilities. Leads become claims only after confirmation on unseen discovery cells.</desc>
+  <desc id="desc">Two alternative prerequisite bundles lead to a flank-width claim. The scheduler draws frontier, detour, or new independent root. A frontier draw favors shallow branches and nodes with fewer attempts and fewer similar ideas already tried. HY4 receives only the chosen idea and equation constraints, never scores, and returns a batch of equations. The harness tests them and confirms claims separately.</desc>
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
       <path d="M0 0L8 4L0 8Z" fill="#6b7280"/>
@@ -55,10 +55,10 @@
       <text x="82" y="621" fill="#526078">Draw a branch, then a node ↓</text>
       <rect x="400" y="576" width="300" height="58" rx="8" fill="#eef1f7"/>
       <text x="415" y="600" font-weight="700">30% · Detour</text>
-      <text x="415" y="621" fill="#526078">Follow a surprise for up to 3 tests</text>
+      <text x="415" y="621" fill="#526078">Try an unusual lead or combination</text>
       <rect x="733" y="576" width="300" height="58" rx="8" fill="#eef1f7"/>
       <text x="748" y="600" font-weight="700">10% · Independent root</text>
-      <text x="748" y="621" fill="#526078">Propose a node without prerequisites</text>
+      <text x="748" y="621" fill="#526078">Draw an idea with no prerequisites</text>
     </g>
     <text x="67" y="666" font-size="15" font-weight="700">2. If frontier: draw an eligible branch</text>
     <text x="1033" y="666" text-anchor="end" font-size="15" fill="#526078">Weight = 1 / (1 + informative contrasts)</text>
@@ -77,20 +77,20 @@
     <text x="67" y="773" font-size="15" font-weight="700">3. Within baseline drift: draw an open, testable node</text>
     <g font-size="15">
       <rect x="67" y="786" width="300" height="64" rx="8" fill="#fff0cf" stroke="#d59721"/>
-      <text x="82" y="812" font-weight="700">Broad angular wave · 57%</text>
-      <text x="82" y="834" fill="#526078">0 prior attempts · example draw</text>
+      <text x="82" y="812" font-weight="700">Broad angular wave · 73%</text>
+      <text x="82" y="834" fill="#526078">0 attempts · 0 similar ideas tried</text>
       <rect x="400" y="786" width="300" height="64" rx="8" fill="#eef1f7"/>
-      <text x="415" y="812" font-weight="700">Asymmetric offset · 29%</text>
-      <text x="415" y="834" fill="#526078">1 prior attempt</text>
+      <text x="415" y="812" font-weight="700">Asymmetric offset · 18%</text>
+      <text x="415" y="834" fill="#526078">1 attempt · 1 similar idea tried</text>
       <rect x="733" y="786" width="300" height="64" rx="8" fill="#eef1f7"/>
-      <text x="748" y="812" font-weight="700">Between-peak floor · 14%</text>
-      <text x="748" y="834" fill="#526078">3 prior attempts</text>
+      <text x="748" y="812" font-weight="700">Between-peak floor · 9%</text>
+      <text x="748" y="834" fill="#526078">3 attempts · 1 similar idea tried</text>
     </g>
-    <text x="67" y="880" font-size="15" fill="#526078">Node weight = 1 / (1 + prior attempts). Normalize weights within each draw.</text>
-    <text x="67" y="912" font-size="16" font-weight="700">The sampled node becomes HY4’s next test prompt. No fit ranking enters the draw.</text>
+    <text x="67" y="880" font-size="15" fill="#526078">Node weight = 1 / [(1 + attempts) × (1 + similar ideas tried)]. Normalize at each draw.</text>
+    <text x="67" y="912" font-size="16" font-weight="700">Chosen idea + equation constraints → HY4 → four distinct equations. No scores go to HY4.</text>
     <rect x="40" y="963" width="1020" height="137" rx="16" fill="white"/>
     <text x="67" y="999" font-size="17" font-weight="700">03 / FOLLOW SURPRISES BEFORE MAKING CLAIMS</text>
-    <text x="67" y="1035" font-size="17" font-weight="700">Unexpected pattern → exploratory detour → frozen prediction → fresh discovery check</text>
-    <text x="67" y="1071" font-size="16" fill="#526078">Let the idea develop across several tests. Log it as a lead until it holds up on unseen cells.</text>
+    <text x="67" y="1035" font-size="17" font-weight="700">Harness fits the batch → logs observations → freezes prediction → checks unseen cells</text>
+    <text x="67" y="1071" font-size="16" fill="#526078">A result stays a lead until it holds up. Fit measurements stay with the harness.</text>
   </g>
 </svg>
