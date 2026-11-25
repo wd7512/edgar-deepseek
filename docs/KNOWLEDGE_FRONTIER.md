@@ -26,22 +26,62 @@ Run in rolling waves. At the start of each exploratory episode, draw a lane: **6
 - **Detour:** The harness draws from unresolved observations, outliers flagged in discovery, or combinations of ideas from unrelated branches. Prefer untried mechanism tags. Record leads and their lineage separately from the graph. Test the batch before drawing again; an early poor fit does not stop it.
 - **New root:** Draw a distinct, directly testable idea from a separate pool of observed patterns and untried mechanism families, seeded by the experimenter or predefined templates. The idea must have no prerequisites in the current map. If it's grounded in an observed pattern and not a duplicate, add it as a provisional standalone node; it can stay disconnected or acquire links later. If no candidate qualifies, treat the lane as unavailable rather than forcing a root.
 
-**HY4's only job is to turn a thread of ideas into a batch of equations.** The experimenter authors the fixed prompt template and the initial idea descriptions. For each draw, the harness starts the thread with the base equation, adds compatible equation ideas from the selected route or detour, and ends with the idea to test next. The thread is an ordered set of design ideas, not a claim that they have been confirmed. Do not merge mutually exclusive routes into a thread by default. An independent-root draw can start a new thread without inheriting earlier graph ideas; the base equation can still be shown as a reference.
+**HY4's only job is to turn a supplied idea or thread into a batch of equations.** The experimenter authors the fixed templates and initial idea descriptions. The harness resolves the draw to a prompt type and fills in the fields; HY4 does not see the draw probability, graph state, or previous evaluation. A thread is an ordered set of design ideas, not a claim that they have been confirmed. Do not merge incompatible routes as if both were true.
+
+### Prompt templates
+
+**Combination** — use for a frontier route with multiple compatible ideas or for a cross-branch detour. Keep this wording fixed:
 
 ```text
 Combine the ideas in this thread:
 
 - Idea 1 — Base equation: {base_equation}
-- Idea 2 — {idea_2}
-- ...
-- Idea N — {idea_n}
+{numbered_ideas_2_through_N}
 
 Give {K} structurally distinct equations that combine these ideas
 and could fit the data shown in the attached images.
+```
 
+**Single-node frontier** — use when the draw targets one change rather than a combination:
+
+```text
+Base equation: {base_equation}
+Idea to test: {selected_idea}
+Keep unchanged: {unchanged_terms}
+
+Give {K} structurally distinct equations that each test this idea
+while keeping the listed terms unchanged. Use the attached images
+of the data and current fit as context.
+```
+
+**Anomaly detour** — use when a surprising pattern motivates a detour and the harness has a specific idea to try:
+
+```text
+Pattern to look at: {observable_pattern_and_plot_region}
+Idea to try: {detour_idea}
+
+Give {K} structurally distinct equations that express this idea
+and could fit the data in the attached images. You may change the
+equation family; the displayed fit is a reference, not a constraint.
+```
+
+**Independent root** — use for the new-root draw. The harness supplies the seed idea, not predecessors, and the model need not inherit any term from the plotted fit:
+
+```text
+New standalone idea: {root_idea}
+
+Give {K} structurally distinct full equations based on this idea
+that could fit the data in the attached images. Build from the
+idea itself; the plotted reference fit is not a starting equation.
+```
+
+Append the same output contract to each template:
+
+```text
 {angle_and_output_conventions}
 {allowed_equation_grammar}
-Return equations and their parameter definitions. Do not fit or rank them.
+Return each equation and its free-parameter definitions. Use different
+structures, not just different parameter values. Do not fit or rank them.
 ```
 
 The harness attaches observed discovery responses overlaid with the current fitted comparator, using a fixed or seeded cell sample. The comparator is the double Gaussian or the reference named by the selected node, not a model picked for having the best score. The overlay shows what the thread is meant to address; it does not compare or grade proposals. Do not send scalar or per-cell scores, rankings, win/loss labels, or prose summarizing previous candidate performance, even on follow-up calls.
