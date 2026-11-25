@@ -1,12 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="720" viewBox="0 0 1100 720" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="890" viewBox="0 0 1100 890" role="img" aria-labelledby="title desc">
   <title id="title">The knowledge frontier</title>
-  <desc id="desc">Two alternative prerequisite bundles lead to a flank-width claim. Every premise within a bundle is required. A separate scheduler chooses a shallow baseline branch over deeper peak and flank branches regardless of whether its first result was negative.</desc>
+  <desc id="desc">Two alternative prerequisite bundles lead to a flank-width claim. The scheduler explores a shallow baseline branch despite a negative result and reserves turns for unexpected leads. Leads become claims only after confirmation on unseen discovery cells.</desc>
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
       <path d="M0 0L8 4L0 8Z" fill="#6b7280"/>
     </marker>
   </defs>
-  <rect width="1100" height="720" rx="20" fill="#f4f5f8"/>
+  <rect width="1100" height="890" rx="20" fill="#f4f5f8"/>
   <g font-family="system-ui, sans-serif" fill="#17233a">
     <text x="48" y="61" font-size="35" font-weight="750">The knowledge frontier</text>
     <text x="49" y="93" font-size="18" fill="#526078">Choose an unresolved claim to test, not a score to beat.</text>
@@ -60,5 +60,9 @@
       <text x="748" y="601">1 informative contrast · negative</text>
     </g>
     <text x="67" y="651" font-size="16" fill="#526078">Test a different baseline explanation. The negative result counts as evidence, not a reason to stop.</text>
+    <rect x="40" y="697" width="1020" height="153" rx="16" fill="white"/>
+    <text x="67" y="734" font-size="17" font-weight="700">03 / FOLLOW SURPRISES BEFORE MAKING CLAIMS</text>
+    <text x="67" y="774" font-size="17" font-weight="700">Unexpected pattern → exploratory detour → frozen prediction → fresh discovery check</text>
+    <text x="67" y="813" font-size="16" fill="#526078">Let the idea develop across several tests. Log it as a lead until it holds up on unseen cells.</text>
   </g>
 </svg>
