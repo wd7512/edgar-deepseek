@@ -76,6 +76,32 @@ def test_cutoff_width_has_a_gradient_at_its_edge():
     np.testing.assert_allclose(edge.model(-2.9, 1, 2, 2.9), edge.model(2 * np.pi - 2.9, 1, 2, 2.9), atol=1e-5)
 
 
+def test_cutoffs_accept_all_comparisons_and_need_real_inputs():
+    for left, op, right in (
+        ("wrap(theta)", "<", "0"),
+        ("wrap(theta)", "<=", "0"),
+        ("wrap(theta)", ">", "0"),
+        ("wrap(theta)", ">=", "0"),
+        ("0", "<", "wrap(theta)"),
+        ("0", ">=", "wrap(theta)"),
+    ):
+        equation = compile_equation({"equation": f"b+a*({left}{op}{right})", "initial": {"b": 1, "a": 2}})
+        assert 0 < equation.model(0.0, 1, 2) < 3
+    with pytest.raises(ValueError, match="real-valued"):
+        compile_equation({"equation": "b+a*((theta*(-1)**0.5)>=0)", "initial": {"b": 1, "a": 2}})
+
+
+def test_undeclared_names_have_their_own_reason():
+    with pytest.raises(ValueError, check=lambda exc: getattr(exc, "code", None) == "unknown_name"):
+        compile_equation({"equation": "b+a*cos(w1)", "initial": {"b": 1, "a": 2, "m1": 3}})
+
+
+def test_generated_idea_mechanism_defaults_to_the_title():
+    choice = {"node": "idea-1", "mode": "independent_root", "parents": [], "lane": "root"}
+    accepted = _generated_idea({"title": "Circular Skew", "change": "Skew each lobe."}, choice, {})
+    assert accepted.mechanism == "circular-skew"
+
+
 @pytest.mark.parametrize(
     ("expression", "reason"),
     [
