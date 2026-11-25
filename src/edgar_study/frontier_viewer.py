@@ -15,6 +15,7 @@ from edgar_study.frontier_seed import BASELINE_ID, baseline_node
 MODES = {
     "single_idea": "Single-idea frontier",
     "combination": "AND combination",
+    "revisit": "Revisit",
     "anomaly_detour": "Anomaly detour",
     "independent_root": "Independent root",
 }
@@ -316,23 +317,36 @@ def _inspector(node, idea, probes, reference, baseline_metrics):
     )
     for batch, event in probes:
         equations = []
-        invalid = 0
         for i, candidate in enumerate(event.get("candidates", []), 1):
             equation = _equation(candidate)
+            label = f"Equation {i}"
+            if candidate.get("source") == "retry":
+                position = candidate.get("replaces")
+                label = (
+                    f"Replacement for proposal {position}" if position is not None else f"Retry equation {i}"
+                )
+            if candidate.get("status") == "invalid":
+                proposal = candidate.get("proposal")
+                rejected = proposal.get("equation") if isinstance(proposal, dict) else None
+                source = f"<code>{escape(rejected)}</code>" if isinstance(rejected, str) else ""
+                reason = escape(candidate.get("reason_code") or "invalid")
+                error = escape(candidate.get("error") or "Invalid proposal.")
+                equations.append(
+                    f'<details data-equation-id="{batch}-{i}"><summary>{label} · Invalid</summary>'
+                    f"{source}<p>{reason}: {error}</p></details>"
+                )
+                continue
             if not equation:
-                invalid += candidate.get("status") == "invalid"
                 continue
             reason = {"duplicate": "duplicate", "fit_failed": "fit failed"}.get(candidate.get("status"), "")
             score = _score_label(candidate.get("metrics"), reason)
             error = candidate.get("error")
             equations.append(
-                f'<details data-equation-id="{batch}-{i}"><summary>Equation {i} · {score}</summary>'
+                f'<details data-equation-id="{batch}-{i}"><summary>{label} · {score}</summary>'
                 f"<code>{escape(equation)}</code>{_metrics_detail(candidate.get('metrics'))}"
                 + (f"<p>{escape(error)}</p>" if error else "")
                 + "</details>"
             )
-        if invalid:
-            equations.append(f"<small>{invalid} invalid proposal(s)</small>")
         if event.get("error"):
             equations.append(f"<p>{escape(event['error'])}</p>")
         elif not equations:
@@ -367,6 +381,9 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
     graph = {idea["node"]: idea for idea in wave.get("graph", [])} if wave else {BASELINE_ID: baseline_node()}
     nodes = {node: idea for node, idea in graph.items() if idea.get("introduced_at", 0) <= index}
     catalog = {idea["node"]: idea for idea in wave.get("idea_catalog", [])} | graph
+    active = wave.get("active_probe") if live else None
+    if active and (idea := active.get("idea")):
+        nodes[idea["node"]] = catalog[idea["node"]] = idea
     probes = defaultdict(list)
     best = {}
     for batch, event in enumerate(episodes, 1):
@@ -390,7 +407,6 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
         counts[BASELINE_ID] = 1
         if wave.get("baseline_exploration"):
             best[BASELINE_ID] = wave["baseline_exploration"]
-    active = wave.get("active_probe") if live else None
     selected = active or (episodes[-1] if episodes else {})
     current = selected.get("node", "")
     planned = wave.get("planned_batches", total) if live else total
@@ -407,8 +423,8 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
         )
     if nodes:
         bar += '<button type="button" data-reset>Reset layout</button>'
-    if current in catalog:
-        label = escape(_label(catalog[current]))
+    if current in catalog or current:
+        label = escape(_label(catalog[current]) if current in catalog else selected.get("label", "New idea"))
         lead = f"Running batch {active['batch']}" if active else "Latest probe"
         focus = f"{lead}: <strong>{label}</strong> · {_mode(selected)}"
         if selected.get("error"):

@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import operator
+import re
 from collections import Counter
 from dataclasses import asdict, dataclass
 from functools import cache, partial
@@ -57,83 +58,6 @@ class Idea:
     routes: tuple[tuple[str, ...], ...] = ()
     lane: str = "frontier"
     label: str = ""
-
-
-DEFAULT_IDEAS = (
-    Idea(
-        "width",
-        "flanks",
-        "asymmetry",
-        "Give the main peak separate left and right widths; leave the second peak and baseline unchanged.",
-        label="Asymmetric main-peak widths",
-    ),
-    Idea(
-        "tip",
-        "peaks",
-        "sharpness",
-        "Free the exponent on the main peak's wrapped angular distance inside its exponential; "
-        "keep its center fixed to the same parameter and leave the second peak and baseline unchanged.",
-        label="Free the main-peak shape exponent",
-    ),
-    Idea(
-        "offset",
-        "second_peak",
-        "offset",
-        "Replace the fixed 180° separation with a fitted angular offset; keep both peak kernels and baseline.",
-        label="Free second peak from 180°",
-    ),
-    Idea(
-        "drift",
-        "baseline",
-        "drift",
-        "Add one full-turn sinusoid to the constant baseline; leave both peak kernels unchanged.",
-        label="Add one baseline harmonic",
-    ),
-    Idea(
-        "harmonic",
-        "harmonics",
-        "harmonic",
-        "Replace both localized peaks with a finite circular Fourier sum and a constant baseline.",
-        lane="root",
-        label="Replace peaks with a Fourier sum",
-    ),
-    Idea(
-        "window",
-        "windows",
-        "window",
-        "Replace both Gaussian kernels with periodic raised-cosine windows that are zero outside their support.",
-        lane="root",
-        label="Replace Gaussians with cosine windows",
-    ),
-    Idea(
-        "blend",
-        "flanks",
-        "blend",
-        "Replace the main Gaussian with a smooth blend of two co-centered kernels to test for shoulders; "
-        "retain the second peak and constant baseline.",
-        lane="detour",
-        label="Blend two co-centered main-peak kernels",
-    ),
-    Idea(
-        "width-drift",
-        "baseline",
-        "interaction",
-        "Combine separate left and right main-peak widths with one baseline harmonic; "
-        "keep their parameters independent and leave the second peak unchanged.",
-        (("width", "drift"),),
-        "detour",
-        "Asymmetric main-peak widths + baseline harmonic",
-    ),
-    Idea(
-        "peak-pair",
-        "peaks",
-        "interaction",
-        "Combine the main peak's free shape exponent with a fitted offset for the second peak; "
-        "leave the baseline and second peak kernel unchanged.",
-        (("tip", "offset"),),
-        label="Main-peak shape exponent + second-peak offset",
-    ),
-)
 
 
 @dataclass(frozen=True)
@@ -368,6 +292,129 @@ def draw(ideas, references, attempts, rng, depth=None):
             {"node": i.node, "parents": list(route)} for i, routes in eligible.values() for route in routes
         ],
     }
+
+
+def draw_generated(nodes, references, history, rng, new_probability, step):
+    """Draw a new route or revisit using proposal validity, never fit quality."""
+    types = {"new": new_probability, "revisit": 1 - new_probability} if nodes else {"new": 1}
+    kind, kind_p = _pick({key: value for key, value in types.items() if value}, rng)
+    choice: dict[str, Any] = {"kind": kind, "kind_probabilities": kind_p}
+    if kind == "revisit":
+        weights = {}
+        for node in nodes:
+            recent = history.get(node, [])[-16:]
+            weights[node] = 1 - 0.85 * sum(recent) / max(1, len(recent))
+        node, node_p = _pick(weights, rng)
+        routes = [
+            route
+            for route in nodes[node].routes or ((),)
+            if all(parent == BASELINE_ID or parent in references for parent in route)
+        ]
+        parents = routes[int(rng.integers(len(routes)))]
+        return {
+            **choice,
+            "node": node,
+            "parents": list(parents),
+            "mode": "revisit",
+            "lane": nodes[node].lane,
+            "node_probabilities": node_p,
+            "route_probability": 1 / len(routes),
+        }
+    pool = [BASELINE_ID, *references]
+    weights = {"single_idea": 0.6, "anomaly_detour": 0.2, "independent_root": 0.1}
+    if len(references) >= 2:
+        weights["combination"] = 0.1
+    mode, mode_p = _pick(weights, rng)
+    if mode == "combination":
+        pool = list(references)
+    count = {"independent_root": 0, "combination": 2}.get(mode, 1)
+    parents = sorted(rng.choice(pool, count, replace=False).tolist())
+    return {
+        **choice,
+        "node": f"idea-{step + 1}",
+        "mode": mode,
+        "parents": parents,
+        "lane": {"anomaly_detour": "detour", "independent_root": "root"}.get(mode, "frontier"),
+        "mode_probabilities": mode_p,
+        "eligible_parents": pool,
+        "route_probability": 1 / math.comb(len(pool), count),
+    }
+
+
+def _idea_key(value):
+    return " ".join(re.findall(r"\w+", value.casefold()))
+
+
+def _generated_idea(value, choice, existing):
+    fields = {"title": 64, "mechanism": 64, "change": 360}
+    if not isinstance(value, dict):
+        raise InvalidReply("invalid_idea", "Return an idea object with a title, mechanism, and change.")
+    parts = {}
+    for field, limit in fields.items():
+        text = value.get(field)
+        if not isinstance(text, str) or not _idea_key(text) or len(text.strip()) > limit:
+            raise InvalidReply(
+                "invalid_idea", f"Idea {field} must be nonempty and at most {limit} characters."
+            )
+        parts[field] = " ".join(text.split())
+    parents = tuple(choice["parents"])
+    routes = ((*parents,),) if parents else ()
+    mechanism = _idea_key(parts["mechanism"]).replace(" ", "-")
+    for idea in existing.values():
+        if idea.routes == routes and (
+            mechanism == idea.mechanism
+            or _idea_key(parts["title"]) == _idea_key(idea.label)
+            or _idea_key(parts["change"]) == _idea_key(idea.text)
+        ):
+            raise InvalidReply("duplicate_idea", f"This repeats the idea {idea.node} on the same route.")
+    return Idea(
+        choice["node"], choice["mode"], mechanism, parts["change"], routes, choice["lane"], parts["title"]
+    )
+
+
+def _generated_prompt(choice, nodes, references, k):
+    selected = choice["node"]
+    if choice["kind"] == "revisit":
+        idea = nodes[selected]
+        task = (
+            f"Revisit {idea.label}: {idea.text}. Keep the same idea and give new implementations. "
+            f"Return only a JSON array with zero to {k} equation objects."
+        )
+    else:
+        mode = choice["mode"]
+        brief = {
+            "single_idea": "Invent one precise change to the selected parent equation.",
+            "anomaly_detour": "Invent one precise change addressing a pattern in the residual plots.",
+            "combination": "Invent one idea explicitly combining the selected parents' changes.",
+            "independent_root": "Invent one independent model family. The plotted baseline is only a reference.",
+        }[mode]
+        known = [
+            {"title": node.label, "mechanism": node.mechanism, "change": node.text}
+            for node in nodes.values()
+            if node.routes == ((tuple(choice["parents"])),) or (not node.routes and not choice["parents"])
+        ]
+        task = (
+            f"{brief} Existing ideas on this route (avoid repeats): {json.dumps(known)}. "
+            "Return only a JSON object with 'idea' and 'equations'. "
+            "The idea has a short, concise 'title' you choose, a specific stable 'mechanism' key "
+            "(use 'offset' for a standalone change to the baseline's peak separation), "
+            f"and a concrete 'change'. Provide zero to {k} structurally distinct equations in 'equations'."
+        )
+    parents = [
+        f"{name}: {BASE}"
+        if name == BASELINE_ID
+        else f"{name}: {nodes[name].label} — {nodes[name].text}. Equation: {references[name].text}"
+        for name in choice["parents"]
+    ]
+    return (
+        f"{task}\nSelected parents: {json.dumps(parents)}.\n"
+        "Use theta in radians, periodic with period 2*pi. Use + - * / **, "
+        "sin, cos, exp, tanh, abs, sqrt, wrap, or a smooth cutoff (x < limit). "
+        "Each equation object has 'equation', 'initial' (parameter names to numeric starts), and "
+        "'parameters' (definitions). Optionally include 'nesting': parent ID to a map from each new "
+        "parameter to a parent parameter name, a number, or [parent parameter name, scale, shift]. "
+        "For double_gaussian use parent parameter names m, b, a1, a2, s. Do not fit or rank."
+    )
 
 
 def _mode(idea, parents):
@@ -658,7 +705,7 @@ class InvalidReply(InvalidEquation):
     pass
 
 
-def _decode(reply, k):
+def _decode_json(reply):
     if not isinstance(reply, str) or not reply.strip():
         raise InvalidReply("empty_reply", "No proposal text returned.")
     text = reply.strip()
@@ -669,14 +716,22 @@ def _decode(reply, k):
         raise InvalidReply("nonfinite_reply_number", "Reply contains a nonfinite JSON number.")
 
     try:
-        values = json.loads(text, parse_constant=reject_number, parse_float=_finite_float)
+        return json.loads(text, parse_constant=reject_number, parse_float=_finite_float)
     except InvalidReply:
         raise
     except (ValueError, RecursionError) as exc:
         raise InvalidReply("invalid_reply_json", "Reply is not readable JSON.") from exc
-    if not isinstance(values, list) or len(values) != k:
-        raise InvalidReply("invalid_reply_count", f"Expected exactly {k} proposals.")
+
+
+def _equation_list(values, k, *, exact=True):
+    if not isinstance(values, list) or len(values) > k or (exact and len(values) != k):
+        count = f"exactly {k}" if exact else f"at most {k}"
+        raise InvalidReply("invalid_reply_count", f"Expected {count} proposals.")
     return values
+
+
+def _decode(reply, k):
+    return _equation_list(_decode_json(reply), k)
 
 
 def _finite_float(value):
@@ -693,7 +748,7 @@ async def execute(
     confirm,
     output,
     *,
-    ideas=DEFAULT_IDEAS,
+    ideas=None,
     batches=6,
     k=4,
     seed=0,
@@ -701,9 +756,14 @@ async def execute(
     final=None,
     waves=1,
     resume=False,
+    new_probability=0.8,
 ):
     """Explore rolling waves, then confirm a frozen shortlist; optionally select and test once."""
+    discovery = ideas is None
+    ideas = () if discovery else ideas
     validate_graph(ideas)
+    if not 0 <= new_probability <= 1:
+        raise ValueError("New-idea probability must be between zero and one.")
     if min(batches, k, waves) < 1:
         raise ValueError("Wave count, batch count and equations per batch must be positive.")
     output.mkdir(parents=True, exist_ok=True)
@@ -713,12 +773,14 @@ async def execute(
     nodes = {i.node: i for i in ideas}
     references, metrics, attempts, depth, seen, exact = {}, {}, Counter(), Counter(), set(), {BASE}
     lineage = {}
+    history: dict[str, list[bool]] = {}
     rng = np.random.default_rng(seed)
     born = set()
     wave: dict[str, Any] = {
         "version": 3,
         "seed": seed,
         "fit_protocol": "nested_parent_v3",
+        "idea_source": "generated" if discovery else "catalog",
         "idea_catalog": [asdict(i) for i in ideas],
         "graph": [baseline_node()],
         "planned_batches": batches * waves,
@@ -727,22 +789,50 @@ async def execute(
         "status": "exploring",
     }
     config = {"batches": batches, "waves": waves, "k": k, "max_iter": max_iter, "finalize": final is not None}
+    if discovery:
+        config["new_probability"] = new_probability
+
+    def next_choice(step):
+        if discovery:
+            return draw_generated(nodes, references, history, rng, new_probability, step)
+        return draw(ideas, references, attempts, rng, depth)
+
+    def track_proposals(event):
+        if discovery and event["node"] in nodes:
+            history.setdefault(event["node"], []).extend(
+                row["status"] in {"duplicate", "invalid"} for row in event["candidates"]
+            )
+
     if resume:
         saved = json.loads(path.read_text())
-        fields = ("version", "seed", "idea_catalog", "planned_batches", "fit_protocol")
+        fields = ("version", "seed", "idea_source", "planned_batches", "fit_protocol")
         if any(saved.get(key) != json.loads(json.dumps(wave[key])) for key in fields):
             raise ValueError("Run checkpoint does not match this frontier configuration.")
         if saved.get("config", config) != config:
             raise ValueError("Run checkpoint does not match this frontier configuration.")
+        if not discovery and saved["idea_catalog"] != json.loads(json.dumps(wave["idea_catalog"])):
+            raise ValueError("Run checkpoint does not match the idea catalog.")
         if saved["status"] in {"complete", "no_fitted_equations"}:
             return saved
         if "selection" in saved:
             raise ValueError("Cannot resume after selection has started; locked tests are one-shot.")
-        for event in saved["episodes"]:
-            choice = draw(ideas, references, attempts, rng, depth)
+        for step, event in enumerate(saved["episodes"]):
+            choice = next_choice(step)
             node = event["node"]
-            if not choice or (choice["node"], choice["parents"]) != (node, event["parents"]):
+            if not choice or any(event.get(key) != choice[key] for key in choice):
                 raise ValueError("Checkpoint does not match the scheduler replay.")
+            if discovery and "idea" in event:
+                value = event["idea"]
+                nodes[node] = Idea(
+                    node,
+                    value["branch"],
+                    value["mechanism"],
+                    value["text"],
+                    tuple(map(tuple, value["routes"])),
+                    value["lane"],
+                    value["label"],
+                )
+                born.add(node)
             attempts[node] += 1
             for record in event["candidates"]:
                 if record["status"] not in {"fitted", "fit_failed"}:
@@ -756,6 +846,13 @@ async def execute(
                     if node not in references:
                         references[node], metrics[node] = candidate, record["metrics"]
                         lineage[node] = event["parents"]
+            track_proposals(event)
+        if discovery:
+            replayed = {event["node"] for event in saved["episodes"]}
+            saved["graph"] = [
+                row for row in saved["graph"] if row["node"] == BASELINE_ID or row["node"] in replayed
+            ]
+            saved["idea_catalog"] = [row for row in saved["idea_catalog"] if row["node"] in replayed]
         wave = saved
         wave.pop("active_probe", None)
         wave["confirmation"] = []
@@ -769,6 +866,8 @@ async def execute(
 
     @cache
     def reference_fit(node):
+        if node == BASELINE_ID:
+            return baseline_fit
         candidate = references[node]
         solve, _ = fit_strategy(node, candidate, tuple(lineage[node]))
         return ParentFit(node, candidate.model, candidate.estimator, solve)
@@ -776,7 +875,7 @@ async def execute(
     def fit_strategy(node, equation, parents):
         mappings = []
         bounds = None
-        standalone_offset = nodes[node].mechanism == "offset" and not nodes[node].routes
+        standalone_offset = nodes[node].mechanism == "offset" and tuple(parents) in {(), (BASELINE_ID,)}
         supplied = equation.nesting if isinstance(equation.nesting, dict) else {}
         template = (
             _baseline_templates().get(equation.key) if len(equation.initial) > len(BASE_NAMES) else None
@@ -793,6 +892,8 @@ async def execute(
                 if standalone_offset:
                     bounds = _offset_bounds(embed)
         for name in parents:
+            if name == BASELINE_ID:
+                continue
             parent = references[name]
             if name not in supplied or len(equation.initial) <= len(parent.initial):
                 continue
@@ -855,19 +956,43 @@ async def execute(
             record.update(status="fit_failed", error=str(exc))
         return None
 
+    def decode_probe(reply, event, step):
+        if not discovery:
+            return _decode(reply, k)
+        value = _decode_json(reply)
+        if event["kind"] == "revisit":
+            return _equation_list(value, k, exact=False)
+        if not isinstance(value, dict):
+            raise InvalidReply("invalid_idea_reply", "Return an object containing idea and equations.")
+        equations = _equation_list(value.get("equations", []), k, exact=False)
+        accepted = _generated_idea(value.get("idea"), event, nodes)
+        nodes[accepted.node] = accepted
+        born.add(accepted.node)
+        record = asdict(accepted)
+        event["idea"] = record
+        wave["active_probe"].update(idea=record, label=accepted.label)
+        _write(path, wave)
+        wave["idea_catalog"].append(record)
+        wave["graph"].append({**record, "introduced_at": step + 1})
+        return equations
+
     for step in range(len(wave["episodes"]), batches * waves):
-        choice = draw(ideas, references, attempts, rng, depth)
+        choice = next_choice(step)
         if choice is None:
             break
         node, parents = choice["node"], choice["parents"]
-        idea = nodes[node]
+        idea = nodes.get(node)
         attempts[node] += 1
         fitted = tuple(reference_fit(p) for p in parents)
-        prompt = _prompt(idea, parents, nodes, references, k)
+        prompt = (
+            _generated_prompt(choice, nodes, references, k)
+            if discovery
+            else _prompt(idea, parents, nodes, references, k)
+        )
         wave_number = step // batches
         event = {
             **choice,
-            "mode": _mode(idea, parents),
+            "mode": choice["mode"] if discovery else _mode(idea, parents),
             "wave": wave_number + 1,
             "image_seed": seed + wave_number,
             "prompt": prompt,
@@ -876,18 +1001,19 @@ async def execute(
         wave["active_probe"] = {
             "batch": step + 1,
             "node": node,
-            "label": idea.label or idea.text,
-            "lane": idea.lane,
+            "label": (idea.label or idea.text) if idea else "New idea",
+            "lane": choice["lane"],
             "mode": event["mode"],
         }
         _write(path, wave)
         batch = None
         unreadable = None
+
         try:
             batch = prepare_images(up, *explore, seed=event["image_seed"], parents=fitted, max_iter=max_iter)
             event.update(cells=list(batch.cells), images=len(batch.images))
             event["reply"] = await proposer.submit(batch, prompt)
-            proposals = _decode(event["reply"], k)
+            proposals = decode_probe(event["reply"], event, step)
         except InvalidReply as exc:
             unreadable = exc
             event["reply_error"] = {"reason_code": exc.code, "error": str(exc)}
@@ -908,7 +1034,7 @@ async def execute(
             retry = event["retry"] = {"instruction": instruction, "reason_code": unreadable.code}
             try:
                 retry["reply"] = await proposer.retry(batch, prompt, event["reply"] or "", instruction)
-                replacements = _decode(retry["reply"], k)
+                replacements = decode_probe(retry["reply"], event, step)
             except ValueError as exc:
                 retry["error"] = str(exc)
                 event["error"] = str(unreadable)
@@ -937,6 +1063,7 @@ async def execute(
                     evaluate(replacement, event, step, replaces=target["position"], replacement=True)
         log.info("Frontier episode %s: %s (%s images)", step + 1, node, event.get("images"))
         del wave["active_probe"]
+        track_proposals(event)
         wave["episodes"].append(event)
         _write(path, wave)
     wave["shortlist"] = {
@@ -966,7 +1093,10 @@ async def execute(
         try:
             result = measure_node(node, eq, confirm)
             measured[node] = result
-            comparators = {"double_gaussian": baseline, **{p: measured[p] for p in lineage[node]}}
+            comparators = {
+                BASELINE_ID: baseline,
+                **{p: measured[p] for p in lineage[node] if p != BASELINE_ID},
+            }
             improved = all(
                 result["mse"] < ref["mse"]
                 and all(
@@ -983,7 +1113,9 @@ async def execute(
     supported = {row["node"] for row in wave["confirmation"] if row["outcome"] == "confirmed_fit"}
 
     def supported_claim(node):
-        return node in supported and all(supported_claim(parent) for parent in lineage[node])
+        return node == BASELINE_ID or (
+            node in supported and all(supported_claim(parent) for parent in lineage[node])
+        )
 
     wave["claims"] = {
         row["node"]: "supported_fit" if supported_claim(row["node"]) else "unresolved"
@@ -1043,7 +1175,7 @@ def run(args):
 def _run(args, output):
     if min(args.waves, args.batches, args.k) < 1 or args.seed < 0:
         raise SystemExit("Use positive waves, batches and K and a nonnegative seed.")
-    ideas = DEFAULT_IDEAS
+    ideas = None
     if args.graph is not None:
         ideas = tuple(
             Idea(
@@ -1057,7 +1189,10 @@ def _run(args, output):
             )
             for row in json.loads(args.graph.read_text())
         )
-    validate_graph(ideas)
+    if ideas is not None:
+        validate_graph(ideas)
+    if not 0 <= args.new_probability <= 1:
+        raise SystemExit("--new-probability must be between zero and one.")
     entry = fetch_models(load_key()).get(MODEL)
     if not entry or not is_free(entry) or "image/png" not in entry["modalities"]["input"]:
         raise SystemExit(f"{MODEL} is not confirmed free with PNG support.")
@@ -1079,6 +1214,8 @@ def _run(args, output):
         "k": args.k,
         "waves": args.waves,
         "finalize": args.finalize,
+        "idea_source": "generated" if ideas is None else "catalog",
+        "new_probability": args.new_probability if ideas is None else None,
     }
     manifest_path = output / "manifest.json"
     if args.resume:
@@ -1106,6 +1243,7 @@ def _run(args, output):
                 final=final,
                 waves=args.waves,
                 ideas=ideas,
+                new_probability=args.new_probability,
                 resume=args.resume,
             )
         finally:

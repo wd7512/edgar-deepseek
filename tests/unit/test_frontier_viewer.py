@@ -109,6 +109,47 @@ def test_probe_failure_is_visible_even_without_a_node():
     assert 'data-node="tip"' not in view
 
 
+def test_idea_with_only_invalid_equations_shows_the_reason_and_retry():
+    wave = {
+        "graph": [
+            {
+                "node": "idea-1",
+                "text": "Use peaks.",
+                "label": "Windowed peaks",
+                "routes": [],
+                "introduced_at": 1,
+            }
+        ],
+        "episodes": [
+            {
+                "node": "idea-1",
+                "mode": "independent_root",
+                "candidates": [
+                    {
+                        "status": "invalid",
+                        "reason_code": "unsupported_operator",
+                        "error": "Unknown operation.",
+                    },
+                    {
+                        "status": "invalid",
+                        "source": "retry",
+                        "replaces": 1,
+                        "reason_code": "invalid_syntax",
+                        "error": "Not an expression.",
+                        "proposal": {"equation": "<bad>"},
+                    },
+                ],
+            }
+        ],
+    }
+    view = render(wave)
+    assert 'data-node="idea-1" data-equations="0"' in view
+    assert "Windowed peaks" in view
+    assert "unsupported_operator" in view
+    assert "Replacement for proposal 1" in view
+    assert "&lt;bad&gt;" in view
+
+
 def test_growing_replay_shows_ideas_and_all_their_probes_only_when_available():
     wave = {
         "version": 2,
