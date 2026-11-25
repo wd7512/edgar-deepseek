@@ -1,6 +1,6 @@
 # EDGAR knowledge-frontier pilot
 
-**Question:** Can `hy4-flash-free` learn which equation changes fix recurring errors in neural tuning curves when its next task is chosen by a gap in knowledge rather than a score ranking?
+**Question:** Can `hy4-flash-free` propose useful new equation ideas for neural tuning curves when the runner chooses the next route without showing fit scores or rankings?
 
 The pilot is separate from the existing EDGAR loop. Start with the double Gaussian, judge fit across the whole curve, and report regional improvements and regressions separately. The pilot tests a workflow; it cannot establish that this search strategy is better than EDGAR.
 
@@ -16,7 +16,15 @@ Use a directed hypergraph: each route stores a set of prerequisite claim IDs and
 
 For example, a flank-asymmetry claim could be supported by three separate findings: a recurring signed flank pattern, persistence when the peak center is freed, and a width-split improvement without meaningful regression elsewhere. An alternative route could instead use a controlled factorial fit to establish the isolated contribution of width asymmetry together with replication on a second discovery cohort. The diagram shows hypothetical evidence, not run results.
 
-## 2. Explore gaps and make room for surprises
+## 2. Grow the frontier without a preset catalog
+
+The default run starts with just the double Gaussian. A seeded draw chooses a **new idea** (80% by default) or a **revisit**. Set `--new-probability` to change the split. If no idea exists yet, the runner always requests a new one.
+
+For a new idea, the runner chooses one fitted parent, two fitted idea parents for an AND combination, or no parents for an independent family. The new-idea mode weights are 60% direct extension, 20% residual detour, 10% AND combination, and 10% independent root, renormalized over eligible modes. Parents are drawn uniformly within each mode. HY4 writes the short title, mechanism key, and precise change, with up to four distinct equations in the same reply. It does not choose parents. The runner checks for repeated titles, mechanism keys, and descriptions on the selected route.
+
+Revisits ask only for equations for the same idea. Every idea can be revisited, even with no fitted equation. Revisit weights are `1 − 0.85 × rejected_fraction`, counting duplicates and invalid proposals among the last 16 equation proposals for that node. Fit scores, MSE, and rankings never set draw weights. A fitting result only determines whether the idea is eligible to be a parent.
+
+### Fixed-catalog mode (`--graph`)
 
 Measure **evidence depth** per branch as the number of distinct, completed, interpretable contrasts, including negative results. Graph depth is separate. Refits of the same contrast, near-duplicate parameter tweaks, and failed executions do not add depth. Replications can strengthen confidence without counting as a new contrast.
 
@@ -26,9 +34,24 @@ Run in rolling waves. At the start of each exploratory episode, draw a lane: **6
 - **Detour:** The harness draws from unresolved observations, outliers flagged in discovery, or combinations of ideas from unrelated branches. Prefer untried mechanism tags. Record leads and their lineage separately from the graph. Test the batch before drawing again; an early poor fit does not stop it.
 - **New root:** Draw a distinct, directly testable idea from a separate pool of observed patterns and untried mechanism families, seeded by the experimenter or predefined templates. The idea must have no prerequisites in the current map. If it's grounded in an observed pattern and not a duplicate, add it as a provisional standalone node; it can stay disconnected or acquire links later. If no candidate qualifies, treat the lane as unavailable rather than forcing a root.
 
-**HY4's only job is to turn a supplied idea or thread into a batch of equations.** The experimenter authors the fixed templates and initial idea descriptions. The harness resolves the draw to a prompt type and fills in the fields; HY4 does not see the draw probability, graph state, or previous evaluation. A thread is an ordered set of design ideas, not a claim that they have been confirmed. Do not merge incompatible routes as if both were true.
+In fixed-catalog mode only, HY4 turns a supplied idea or thread into a batch of equations. The experimenter provides the initial idea descriptions. A thread is an ordered set of design ideas, not a claim that they have been confirmed.
 
 ### Prompt templates (pilot v1)
+
+The default generated-idea prompt asks for one idea plus equations, and the runner supplies the selected parents:
+
+```text
+{one precise task: extend a parent, address a residual pattern, combine parents, or start independently}
+Existing ideas on this route (avoid repeats): {known_ideas}
+Selected parents: {parent_ids_and_equations}
+Return only a JSON object with 'idea' and 'equations'.
+The idea has a short, concise 'title' you choose, a specific stable 'mechanism' key,
+and a concrete 'change'. Provide zero to {K} structurally distinct equations in 'equations'.
+{angle_and_output_conventions}
+{allowed_equation_grammar_and_optional_nesting_map}
+```
+
+A revisit prompt keeps the same idea and asks only for an array of new equations. The templates below apply only with `--graph`.
 
 **Combination** — use for a frontier route with multiple compatible ideas or for a cross-branch detour. Keep this wording fixed:
 
@@ -113,19 +136,19 @@ JAX_PLATFORMS=cpu uv run edgar frontier \
   --output results/frontier/wave-1 --seed 17
 ```
 
-This runs six batches of four proposals with the free model only. Use `--waves N` to run multiple six-batch waves with a fresh seeded diagnostic sample each wave and a single confirmation pass after the last wave. `--batches 1` is useful for a small smoke test. Use a new output directory per run. The built-in map can be replaced with `--graph` and a JSON array of objects with `node`, `branch`, `mechanism`, `text`, optional `lane` (`frontier`, `detour`, or `root`) and optional `routes` (array of prerequisite ID arrays). An independent root is an experimenter-supplied idea, not a request for HY4 to invent an idea.
+This runs six batches of up to four equations with the free model only. Use `--waves N` to run multiple six-batch waves with a fresh seeded diagnostic sample each wave and a single confirmation pass after the last wave. `--batches 1` is useful for a small smoke test. Use a new output directory per run. For fixed-catalog mode, pass `--graph` and a JSON array of objects with `node`, `branch`, `mechanism`, `text`, optional `lane` (`frontier`, `detour`, or `root`), and optional `routes` (array of prerequisite ID arrays).
 
 Use `node` as a stable ID and optionally provide a short, precise `label` for the viewer. In `text`, describe the one mechanism to test and what stays fixed, or name the exact mechanisms to combine. A probe is one batch exploring one idea. The same idea can be probed repeatedly, and each probe may produce multiple equations.
 
 `manifest.json` records the partition and seed; `wave.json` records eligible draws, probabilities, prompts, sampled rows, proposals, and all fit outcomes. The first distinct equation that yields a finite fit at a node becomes its exploratory reference; having a reference can unlock a continuation but is not confirmation. The frozen shortlist is checked on untouched discovery neurons against the double Gaussian and every parent used in the selected route. “Supported fit” means the predeclared fit check passed, not that a biological mechanism has been established. Frozen hypotheses or confirmation data from repeated runs are not independent.
 
-The audit separates the pool of candidate ideas (`idea_catalog`) from the growing graph (`graph`). The original double Gaussian is the only node at batch zero. Ideas enter the graph with their first distinct, valid equation, even if fitting fails. Baseline-based probes get an arrow from the double Gaussian; independent roots appear without an incoming arrow. Invalid or duplicate proposals alone do not add a node. Each discovered idea records the batch when it appeared. A compiled equation that fails to fit is still visible but does not unlock anything.
+The original double Gaussian is the only node at batch zero. In generated mode an accepted idea appears live before fitting, even if its batch has no usable equations. Its birth is committed with the completed batch; an interrupted batch may be requested again. A revisit adds a probe to the same node. Baseline-based ideas get an arrow from the double Gaussian; independent roots appear without an incoming arrow. In fixed-catalog mode, ideas still enter with their first distinct, valid equation. Invalid proposals and fitting failures are visible in node details but do not unlock prerequisites.
 
 By default, selection and locked-test cells are unused. Use `--finalize` only for the final predeclared run: pick among supported equations and the baseline on selection cells by penalized score, then evaluate the chosen equation and the baseline once on locked cells. Do not use locked-test results to tune a later wave.
 
 To continue an interrupted run, rerun the original command with `--resume` and the same dataset, output directory, graph, seed, and batch options. Completed batches and the spend ledger are preserved. An interrupted batch may be requested again; the scheduler and duplicate history are rebuilt from completed batches. Once final selection has started, an interrupted run cannot resume to avoid repeating locked tests.
 
-If HY4 repeats an already-tested equation exactly (ignoring outer whitespace), the runner makes at most one follow-up request for replacements. It sends the original prompt and images, the original reply, and names the repeated equations. It does not send metrics or fit outcomes. Other structural duplicates are still skipped without a follow-up.
+If HY4 repeats an already-tested equation exactly (ignoring outer whitespace) or submits a proposal that fails validation, the runner makes at most one follow-up request for replacements. It sends the original prompt and images, the original reply, and the affected proposal positions with stable reason codes. If the whole reply is unreadable, it requests the full reply again instead. It does not send metrics, fit outcomes, or numerical ranks. Other structural duplicates and numerical fitting failures do not trigger a follow-up.
 
 ## Watching the graph locally
 

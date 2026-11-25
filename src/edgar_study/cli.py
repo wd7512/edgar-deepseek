@@ -215,8 +215,11 @@ def main():
     frontier.add_argument("--seed", type=int, default=0)
     frontier.add_argument("--batches", type=int, default=6)
     frontier.add_argument("--waves", type=int, default=1)
-    frontier.add_argument("--graph", type=Path, help="Optional JSON array of idea nodes and routes.")
-    frontier.add_argument("--k", type=int, default=4, help="Equations per prompt.")
+    frontier.add_argument("--graph", type=Path, help="Use a fixed catalog instead of HY4-generated ideas.")
+    frontier.add_argument("--k", type=int, default=4, help="Maximum equations per generated probe.")
+    frontier.add_argument(
+        "--new-probability", type=float, default=0.8, help="Chance of a new idea vs. a revisit."
+    )
     frontier.add_argument("--finalize", action="store_true", help="Use selection and locked-test cells once.")
     frontier.set_defaults(func=lambda args: _load("frontier_runner", "run")(args))
 

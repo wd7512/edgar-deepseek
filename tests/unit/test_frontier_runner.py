@@ -17,9 +17,11 @@ from edgar_study.frontier_runner import (
     _trials,
     compile_equation,
     draw,
+    draw_generated,
     execute,
     validate_graph,
 )
+from edgar_study.frontier_viewer import render
 from edgar_study.upstream import import_upstream
 
 
@@ -502,3 +504,114 @@ def test_tried_independent_root_can_be_probed_again():
     root = Idea("root", "peaks", "harmonic", "Use circular harmonics.", lane="root")
     choice = draw((root,), {}, {"root": 1}, np.random.default_rng(8))
     assert choice["node"] == "root"
+
+
+def test_generated_idea_is_visible_without_equations_and_can_be_revisited_after_resume(tmp_path):
+    up = import_upstream(Path(__file__).resolve().parents[2])
+    x = np.tile(np.linspace(0, 2 * np.pi, 48, endpoint=False), (10, 1))
+    y = 2 + np.cos(x)
+    proposal = {"equation": "b+a*cos(theta)", "initial": {"b": 2, "a": 1}}
+    idea = {
+        "title": "Single circular harmonic",
+        "mechanism": "single-harmonic",
+        "change": "Use one cosine term.",
+    }
+
+    class Stub:
+        async def submit(self, batch, prompt):
+            state = json.loads((tmp_path / "wave.json").read_text())
+            if state["active_probe"]["batch"] == 1:
+                return json.dumps({"idea": idea, "equations": []})
+            if not resume:
+                raise InterruptedError
+            return json.dumps([proposal])
+
+    def run():
+        return asyncio.run(
+            execute(
+                up,
+                Stub(),
+                (x, y),
+                (x, y),
+                tmp_path,
+                batches=2,
+                k=4,
+                new_probability=0,
+                resume=resume,
+                max_iter=0,
+            )
+        )
+
+    resume = False
+    with pytest.raises(InterruptedError):
+        run()
+    paused = json.loads((tmp_path / "wave.json").read_text())
+    assert [node["introduced_at"] for node in paused["graph"]] == [0, 1]
+    assert paused["graph"][1]["label"] == idea["title"]
+    assert paused["episodes"][0]["candidates"] == []
+    orphan = {**paused["graph"][1], "node": "idea-orphan", "introduced_at": 2}
+    paused["graph"].append(orphan)
+    paused["idea_catalog"].append(orphan)
+    (tmp_path / "wave.json").write_text(json.dumps(paused))
+    resume = True
+    result = run()
+    assert result["episodes"][0] == paused["episodes"][0]
+    assert [event["kind"] for event in result["episodes"]] == ["new", "revisit"]
+    assert len(result["graph"]) == 2
+    assert "idea-orphan" not in {row["node"] for row in result["idea_catalog"]}
+    assert result["episodes"][1]["node"] == paused["graph"][1]["node"]
+    assert result["episodes"][1]["candidates"][0]["status"] == "fitted"
+    assert result["confirmation"][0]["node"] == paused["graph"][1]["node"]
+
+
+def test_draw_only_uses_fitted_idea_parents_and_downweights_rejected_revisits():
+    def idea(node):
+        return Idea(node, "root", node, node, lane="root")
+
+    nodes = {key: idea(key) for key in ("bad", "good", "unfitted")}
+    history = {"bad": [True] * 16, "good": [False] * 16}
+    revisit = draw_generated(nodes, {"bad", "good"}, history, np.random.default_rng(0), 0, 5)
+    weights = revisit["node_probabilities"]
+    assert 0 < weights["bad"] < weights["good"]
+    assert weights["unfitted"] > 0
+    combinations = 0
+    for seed in range(60):
+        new = draw_generated(nodes, {"good": None, "bad": None}, history, np.random.default_rng(seed), 1, 5)
+        assert set(new["parents"]) <= {"double_gaussian", "good", "bad"}
+        if new["mode"] == "combination":
+            combinations += 1
+            assert set(new["parents"]) == {"good", "bad"}
+    assert combinations > 0
+
+
+def test_generated_idea_is_visible_during_equation_retry(tmp_path):
+    up = import_upstream(Path(__file__).resolve().parents[2])
+    x = np.tile(np.linspace(0, 2 * np.pi, 48, endpoint=False), (10, 1))
+    y = 2 + np.cos(x)
+    snapshots = []
+
+    class Stub:
+        async def submit(self, batch, prompt):
+            return json.dumps(
+                {
+                    "idea": {
+                        "title": "Circular shoulder",
+                        "mechanism": "shoulder",
+                        "change": "Add a cosine shoulder.",
+                    },
+                    "equations": [{"equation": "b + a*log(theta)", "initial": {"b": 2, "a": 1}}],
+                }
+            )
+
+        async def retry(self, batch, prompt, previous_reply, instruction):
+            snapshots.append(json.loads((tmp_path / "wave.json").read_text()))
+            return '[{"equation":"b+a*cos(theta)","initial":{"b":2,"a":1}}]'
+
+    result = asyncio.run(execute(up, Stub(), (x, y), (x, y), tmp_path, batches=1, max_iter=0))
+    assert len(snapshots) == 1
+    assert 'data-node="idea-1" data-equations="0"' in render(snapshots[0])
+    assert 'data-node="idea-1"' not in render(snapshots[0], 0)
+    event = result["episodes"][0]
+    assert [row["status"] for row in event["candidates"]] == ["invalid", "fitted"]
+    assert event["retry"]["targets"][0]["reason_code"] == "unsupported_operator"
+    assert result["graph"][1]["label"] == "Circular shoulder"
