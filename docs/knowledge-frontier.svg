@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1100" height="890" viewBox="0 0 1100 890" role="img" aria-labelledby="title desc">
   <title id="title">The knowledge frontier</title>
-  <desc id="desc">Two alternative prerequisite bundles lead to a flank-width claim. The scheduler explores a shallow baseline branch despite a negative result and reserves turns for unexpected leads. Leads become claims only after confirmation on unseen discovery cells.</desc>
+  <desc id="desc">Two alternative prerequisite bundles lead to a flank-width claim. A stochastic scheduler chooses frontier, detour, or new independent root. In the frontier lane it favors shallower branches. Leads become claims only after confirmation on unseen discovery cells.</desc>
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
       <path d="M0 0L8 4L0 8Z" fill="#6b7280"/>
@@ -51,15 +51,15 @@
     <g font-size="16">
       <rect x="67" y="552" width="300" height="65" rx="8" fill="#eef1f7"/>
       <text x="82" y="578" font-weight="700">Peak tips</text>
-      <text x="82" y="601" fill="#526078">6 informative contrasts</text>
+      <text x="82" y="601" fill="#526078">6 contrasts · 15% within frontier</text>
       <rect x="400" y="552" width="300" height="65" rx="8" fill="#eef1f7"/>
       <text x="415" y="578" font-weight="700">Flanks</text>
-      <text x="415" y="601" fill="#526078">2 informative contrasts</text>
+      <text x="415" y="601" fill="#526078">2 contrasts · 34% within frontier</text>
       <rect x="733" y="552" width="300" height="65" rx="8" fill="#fff0cf" stroke="#d59721"/>
-      <text x="748" y="578" font-weight="700">Baseline drift → explore next</text>
-      <text x="748" y="601">1 informative contrast · negative</text>
+      <text x="748" y="578" font-weight="700">Baseline drift · one negative test</text>
+      <text x="748" y="601">1 contrast · 51% within frontier</text>
     </g>
-    <text x="67" y="651" font-size="16" fill="#526078">Test a different baseline explanation. The negative result counts as evidence, not a reason to stop.</text>
+    <text x="67" y="651" font-size="16" fill="#526078">Draw an episode: 60% frontier (above) · 30% follow a surprise · 10% try a new independent root.</text>
     <rect x="40" y="697" width="1020" height="153" rx="16" fill="white"/>
     <text x="67" y="734" font-size="17" font-weight="700">03 / FOLLOW SURPRISES BEFORE MAKING CLAIMS</text>
     <text x="67" y="774" font-size="17" font-weight="700">Unexpected pattern → exploratory detour → frozen prediction → fresh discovery check</text>
