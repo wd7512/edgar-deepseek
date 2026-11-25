@@ -106,7 +106,18 @@ class GoClient:
             headers={**headers(load_key()), "x-opencode-session": session_id},
         )
 
-    async def chat(self, model, prompt, temperature=None, effort=None, img_bytes=None, *, images=(), **meta):
+    async def chat(
+        self,
+        model,
+        prompt,
+        temperature=None,
+        effort=None,
+        img_bytes=None,
+        *,
+        images=(),
+        followup=None,
+        **meta,
+    ):
         """Return the reply text, or None on failure (upstream scores None as a failed program)."""
         if model not in self.free_models and not self.allow_paid:
             raise BudgetExhausted(f"{model} is not a free model; pass --allow-paid to use it.")
@@ -133,6 +144,11 @@ class GoClient:
             "messages": [{"role": "user", "content": content}],
             "max_tokens": self.max_tokens,
         }
+        if followup is not None:
+            previous_reply, instruction = followup
+            body["messages"].extend(
+                [{"role": "assistant", "content": previous_reply}, {"role": "user", "content": instruction}]
+            )
         if temperature is not None:
             body["temperature"] = temperature
         if effort:

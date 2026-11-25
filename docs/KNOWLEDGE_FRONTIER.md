@@ -121,7 +121,11 @@ Use `node` as a stable ID and optionally provide a short, precise `label` for th
 
 The audit separates the pool of candidate ideas (`idea_catalog`) from the growing graph (`graph`). The original double Gaussian is the only node at batch zero. Ideas enter the graph with their first distinct, valid equation, even if fitting fails. Baseline-based probes get an arrow from the double Gaussian; independent roots appear without an incoming arrow. Invalid or duplicate proposals alone do not add a node. Each discovered idea records the batch when it appeared. A compiled equation that fails to fit is still visible but does not unlock anything.
 
-By default, selection and locked-test cells are unused. Use `--finalize` only for the final predeclared run: pick among supported equations and the baseline on selection cells by penalized score, then evaluate the chosen equation and the baseline once on locked cells. Do not use locked-test results to tune a later wave. Runs do not resume from an existing audit directory.
+By default, selection and locked-test cells are unused. Use `--finalize` only for the final predeclared run: pick among supported equations and the baseline on selection cells by penalized score, then evaluate the chosen equation and the baseline once on locked cells. Do not use locked-test results to tune a later wave.
+
+To continue an interrupted run, rerun the original command with `--resume` and the same dataset, output directory, graph, seed, and batch options. Completed batches and the spend ledger are preserved. An interrupted batch may be requested again; the scheduler and duplicate history are rebuilt from completed batches. Once final selection has started, an interrupted run cannot resume to avoid repeating locked tests.
+
+If HY4 repeats an already-tested equation exactly (ignoring outer whitespace), the runner makes at most one follow-up request for replacements. It sends the original prompt and images, the original reply, and names the repeated equations. It does not send metrics or fit outcomes. Other structural duplicates are still skipped without a follow-up.
 
 ## Watching the graph locally
 
@@ -131,4 +135,4 @@ uv run edgar frontier-view --run results/frontier/wave-1
 
 Open [localhost:8765](http://127.0.0.1:8765/). The read-only server starts with the double Gaussian while waiting for a new run and follows `wave.json` every two seconds. Use the timeline to replay a prefix, then **Live / latest** to resume following. Click an idea to see its probes and open individual equations. Drag nodes to rearrange the diagram; positions are saved in that browser for the run, and **Reset layout** restores the starting positions. Arrows show prerequisite routes. An **AND** junction requires a fit from every parent; separate routes are alternatives. Older audits replay the graph they recorded.
 
-Each scored equation shows its penalized exploration fit score (lower is better). New runs score the double Gaussian on the same exploration cohort for comparison. These scores appear in the viewer and the audit, never in HY4 prompts.
+Nodes show penalized fit score (lower is better), unpenalized held-out MSE, and free parameter count for their best-scoring equation through the selected batch. Click a node for metrics on individual equations. The double Gaussian is scored on the same exploration cohort. These metrics appear in the viewer and audit, never in HY4 prompts.

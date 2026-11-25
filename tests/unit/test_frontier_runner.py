@@ -48,31 +48,60 @@ def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):
     x, y = np.tile(np.asarray(x), (4, 1)), np.tile(np.asarray(y), (4, 1))
     seen = []
     snapshots = []
+    retry_inputs = []
+
+    def reply(n):
+        return json.dumps([{"equation": f"b + a*cos({n}*theta)", "initial": {"b": 3, "a": 1}}])
 
     class Stub:
+        interrupt = True
+
         async def submit(self, batch, prompt):
+            if len(seen) == 2 and self.interrupt:
+                self.interrupt = False
+                raise InterruptedError
             seen.append((len(batch.images), prompt))
             snapshots.append(json.loads((tmp_path / "wave.json").read_text()))
-            return json.dumps([{"equation": f"b + a*cos({len(seen)}*theta)", "initial": {"b": 3, "a": 1}}])
+            return reply(1 if len(seen) == 3 else len(seen))
 
-    result = asyncio.run(
-        execute(
-            up,
-            Stub(),
-            (x[:10], y[:10]),
-            (x[10:20], y[10:20]),
-            tmp_path,
-            ideas=(
-                Idea("a", "peak", "harmonic", "Use one circular harmonic.", lane="root"),
-                Idea("b", "peak", "harmonic", "Try a higher harmonic.", lane="root"),
-                Idea("c", "peak", "harmonic", "Combine the patterns.", (("a", "b"),)),
-            ),
-            batches=3,
-            k=1,
-            seed=2,
-            max_iter=8,
+        async def retry(self, batch, prompt, previous_reply, instruction):
+            retry_inputs.append((len(batch.images), prompt, previous_reply, instruction))
+            return reply(3)
+
+    stub = Stub()
+
+    def run(**kwargs):
+        return asyncio.run(
+            execute(
+                up,
+                stub,
+                (x[:10], y[:10]),
+                (x[10:20], y[10:20]),
+                tmp_path,
+                ideas=(
+                    Idea("a", "peak", "harmonic", "Use one circular harmonic.", lane="root"),
+                    Idea("b", "peak", "harmonic", "Try a higher harmonic.", lane="root"),
+                    Idea("c", "peak", "harmonic", "Combine the patterns.", (("a", "b"),)),
+                ),
+                batches=3,
+                k=1,
+                seed=2,
+                max_iter=8,
+                **kwargs,
+            )
         )
-    )
+
+    with pytest.raises(InterruptedError):
+        run()
+    partial = json.loads((tmp_path / "wave.json").read_text())
+    assert len(partial["episodes"]) == 2 and partial["active_probe"]["batch"] == 3
+    result = run(resume=True)
+    assert result["episodes"][:2] == partial["episodes"]
+    assert retry_inputs == [(40, seen[2][1], reply(1), result["episodes"][2]["retry"]["instruction"])]
+    assert "b + a*cos(1*theta)" in retry_inputs[0][3]
+    assert "score" not in retry_inputs[0][3].lower()
+    assert [row["status"] for row in result["episodes"][2]["candidates"]] == ["duplicate", "fitted"]
+    assert run(resume=True) == result
     assert [n for n, _ in seen] == [20, 20, 40]
     assert any("Use one circular harmonic." in prompt for _, prompt in seen)
     assert all("score" not in prompt.lower() for _, prompt in seen)

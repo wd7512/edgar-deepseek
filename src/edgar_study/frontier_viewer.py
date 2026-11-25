@@ -217,7 +217,7 @@ def _label(idea):
     return idea.get("label") or idea["text"]
 
 
-def _graph(nodes, catalog, counts, current):
+def _graph(nodes, catalog, counts, best, current):
     positions, height = _layout(catalog)
     edges, cards = [], []
     for node, idea in nodes.items():
@@ -247,14 +247,15 @@ def _graph(nodes, catalog, counts, current):
         )
         count = counts[node]
         summary = f"{count} equation{'s' if count != 1 else ''}"
+        metrics = _metrics_line(best.get(node))
         cards.append(
             f'<g class="node{" current" if node == current else ""}" data-node="{escape(node)}" '
             f'data-equations="{count}" data-home-x="{x}" data-home-y="{y}" '
             f'transform="translate({x},{y})" tabindex="0" role="button" '
-            f'aria-label="{escape(title)}: {summary}">'
-            f"<title>{escape(idea['text'])}</title>"
+            f'aria-label="{escape(title)}: {summary}; {metrics}">'
+            f"<title>{escape(idea['text'])} {summary}. MSE is unpenalized and measured on held-out trials.</title>"
             '<rect width="192" height="68" x="-96" y="-34" rx="5"/>'
-            f'{labels}<text class="sub" y="25">{summary}</text></g>'
+            f'{labels}<text class="sub" y="25">{metrics}</text></g>'
         )
     return (
         f'<svg class="graph" style="--graph-h:{height}px" viewBox="0 0 1000 {height}" '
@@ -288,13 +289,25 @@ def _score_label(metrics, reason=""):
     return f"No fit score ({escape(reason)})" if reason else "No fit score"
 
 
+def _metrics_line(metrics):
+    if not metrics or not all(key in metrics for key in ("score", "mse", "parameters")):
+        return "Score — · MSE — · params —"
+    return f"Score {metrics['score']:.5g} · MSE {metrics['mse']:.5g} · {metrics['parameters']} params"
+
+
+def _metrics_detail(metrics):
+    if metrics and "mse" in metrics and "parameters" in metrics:
+        return f"<p>Held-out MSE: {metrics['mse']:.6g} · Free parameters: {metrics['parameters']}</p>"
+    return ""
+
+
 def _inspector(node, idea, probes, reference, baseline_metrics):
     seed = idea.get("equation") if node == BASELINE_ID else None
     cards = (
         [
             '<details class="probe" data-equation-id="seed">'
             f"<summary>Starting equation · {_score_label(baseline_metrics)}</summary>"
-            f"<code>{escape(seed)}</code></details>"
+            f"<code>{escape(seed)}</code>{_metrics_detail(baseline_metrics)}</details>"
         ]
         if seed
         else []
@@ -312,7 +325,7 @@ def _inspector(node, idea, probes, reference, baseline_metrics):
             error = candidate.get("error")
             equations.append(
                 f'<details data-equation-id="{batch}-{i}"><summary>Equation {i} · {score}</summary>'
-                f"<code>{escape(equation)}</code>"
+                f"<code>{escape(equation)}</code>{_metrics_detail(candidate.get('metrics'))}"
                 + (f"<p>{escape(error)}</p>" if error else "")
                 + "</details>"
             )
@@ -353,8 +366,18 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
     nodes = {node: idea for node, idea in graph.items() if idea.get("introduced_at", 0) <= index}
     catalog = {idea["node"]: idea for idea in wave.get("idea_catalog", [])} | graph
     probes = defaultdict(list)
+    best = {}
     for batch, event in enumerate(episodes, 1):
-        probes[event["node"]].append((batch, event))
+        node = event["node"]
+        probes[node].append((batch, event))
+        for candidate in event.get("candidates", []):
+            metrics = candidate.get("metrics")
+            if (
+                metrics
+                and candidate.get("status") == "fitted"
+                and (node not in best or metrics["score"] < best[node]["score"])
+            ):
+                best[node] = metrics
     counts = Counter(
         event["node"]
         for event in episodes
@@ -363,6 +386,8 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
     )
     if nodes.get(BASELINE_ID, {}).get("equation"):
         counts[BASELINE_ID] = 1
+        if wave.get("baseline_exploration"):
+            best[BASELINE_ID] = wave["baseline_exploration"]
     active = wave.get("active_probe") if live else None
     selected = active or (episodes[-1] if episodes else {})
     current = selected.get("node", "")
@@ -395,7 +420,7 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
             _inspector(node, idea, probes[node], shortlist.get(node), wave.get("baseline_exploration"))
             for node, idea in nodes.items()
         )
-        graph = _graph(nodes, catalog, counts, current)
+        graph = _graph(nodes, catalog, counts, best, current)
         content += (
             f'<section class="graph-shell">{graph}{inspectors}</section>'
             "<small>Click a node for probes and equations · Drag to move · AND requires every parent fit</small>"

@@ -74,6 +74,27 @@ def test_inspector_shows_seed_and_candidate_scores_in_the_correct_batch():
     assert "Fit score: 75.25" not in render(wave, 0)
 
 
+def test_node_metrics_come_from_one_best_scored_equation_and_follow_replay():
+    def event(score, mse, parameters):
+        return {
+            "node": "a",
+            "candidates": [
+                {
+                    "equation": f"{score}*theta",
+                    "status": "fitted",
+                    "metrics": {"score": score, "mse": mse, "parameters": parameters},
+                }
+            ],
+        }
+
+    wave = {
+        "graph": [{"node": "a", "text": "A", "routes": []}],
+        "episodes": [event(4, 0.3, 5), event(3, 0.4, 2)],
+    }
+    assert "Score 4 · MSE 0.3 · 5 params" in render(wave, 1)
+    assert "Score 3 · MSE 0.4 · 2 params" in render(wave)
+
+
 def test_probe_failure_is_visible_even_without_a_node():
     wave = {
         "version": 2,

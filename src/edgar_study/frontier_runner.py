@@ -2,6 +2,7 @@
 
 import ast
 import asyncio
+import fcntl
 import json
 import logging
 import math
@@ -9,6 +10,7 @@ import operator
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -433,6 +435,7 @@ async def execute(
     max_iter=2000,
     final=None,
     waves=1,
+    resume=False,
 ):
     """Explore rolling waves, then confirm a frozen shortlist; optionally select and test once."""
     validate_graph(ideas)
@@ -440,14 +443,14 @@ async def execute(
         raise ValueError("Wave count, batch count and equations per batch must be positive.")
     output.mkdir(parents=True, exist_ok=True)
     path = output / "wave.json"
-    if path.exists():
+    if path.exists() and not resume:
         raise FileExistsError(path)
     nodes = {i.node: i for i in ideas}
-    references, metrics, attempts, depth, seen = {}, {}, Counter(), Counter(), set()
+    references, metrics, attempts, depth, seen, exact = {}, {}, Counter(), Counter(), set(), {BASE}
     lineage = {}
     rng = np.random.default_rng(seed)
     born = set()
-    wave = {
+    wave: dict[str, Any] = {
         "version": 3,
         "seed": seed,
         "idea_catalog": [asdict(i) for i in ideas],
@@ -457,9 +460,79 @@ async def execute(
         "confirmation": [],
         "status": "exploring",
     }
+    config = {"batches": batches, "waves": waves, "k": k, "max_iter": max_iter, "finalize": final is not None}
+    if resume:
+        saved = json.loads(path.read_text())
+        fields = ("version", "seed", "idea_catalog", "planned_batches")
+        if any(saved.get(key) != json.loads(json.dumps(wave[key])) for key in fields):
+            raise ValueError("Run checkpoint does not match this frontier configuration.")
+        if saved.get("config", config) != config:
+            raise ValueError("Run checkpoint does not match this frontier configuration.")
+        if saved["status"] in {"complete", "no_fitted_equations"}:
+            return saved
+        if "selection" in saved:
+            raise ValueError("Cannot resume after selection has started; locked tests are one-shot.")
+        for event in saved["episodes"]:
+            choice = draw(ideas, references, attempts, rng, depth)
+            node = event["node"]
+            if not choice or (choice["node"], choice["parents"]) != (node, event["parents"]):
+                raise ValueError("Checkpoint does not match the scheduler replay.")
+            attempts[node] += 1
+            for record in event["candidates"]:
+                if record["status"] not in {"fitted", "fit_failed"}:
+                    continue
+                candidate = compile_equation(record["proposal"])
+                seen.add(candidate.key)
+                exact.add(candidate.text.strip())
+                born.add(node)
+                if record["status"] == "fitted":
+                    depth[nodes[node].branch] += 1
+                    if node not in references:
+                        references[node], metrics[node] = candidate, record["metrics"]
+                        lineage[node] = event["parents"]
+        wave = saved
+        wave.pop("active_probe", None)
+        wave["confirmation"] = []
+        wave["status"] = "exploring"
+    wave["config"] = config
     _write(path, wave)
-    wave["baseline_exploration"] = _measure(up, _baseline(up), explore, max_iter)
-    for step in range(batches * waves):
+    if "baseline_exploration" not in wave:
+        wave["baseline_exploration"] = _measure(up, _baseline(up), explore, max_iter)
+
+    def evaluate(proposal, event, step, duplicates, *, retry=False):
+        node, parents = event["node"], event["parents"]
+        idea = nodes[node]
+        record = {"proposal": proposal, **({"source": "retry"} if retry else {})}
+        event["candidates"].append(record)
+        try:
+            candidate = compile_equation(proposal)
+        except (ValueError, KeyError, TypeError, FloatingPointError, OverflowError) as exc:
+            record.update(status="invalid", error=str(exc))
+            return
+        record["equation"] = candidate.text
+        text = candidate.text.strip()
+        if text in exact or candidate.key in seen:
+            record["status"] = "duplicate"
+            if text in exact and not retry:
+                duplicates.append(text)
+            return
+        seen.add(candidate.key)
+        exact.add(text)
+        if node not in born:
+            born.add(node)
+            routes = idea.routes or (() if idea.lane == "root" else ((BASELINE_ID,),))
+            wave["graph"].append({**asdict(idea), "routes": routes, "introduced_at": step + 1})
+        try:
+            result = _measure(up, candidate, explore, max_iter)
+            record.update(status="fitted", metrics=result)
+            depth[idea.branch] += 1
+            if node not in references:
+                references[node], metrics[node] = candidate, result
+                lineage[node] = parents
+        except (ValueError, KeyError, TypeError, FloatingPointError, OverflowError) as exc:
+            record.update(status="fit_failed", error=str(exc))
+
+    for step in range(len(wave["episodes"]), batches * waves):
         choice = draw(ideas, references, attempts, rng, depth)
         if choice is None:
             break
@@ -485,6 +558,7 @@ async def execute(
             "mode": event["mode"],
         }
         _write(path, wave)
+        batch = None
         try:
             batch = prepare_images(up, *explore, seed=event["image_seed"], parents=fitted, max_iter=max_iter)
             event.update(cells=list(batch.cells), images=len(batch.images))
@@ -493,32 +567,26 @@ async def execute(
         except ValueError as exc:
             event["error"] = str(exc)
             proposals = []
+        duplicates = []
+
         for proposal in proposals:
-            record = {"proposal": proposal}
-            event["candidates"].append(record)
+            evaluate(proposal, event, step, duplicates)
+        if duplicates and batch is not None:
+            instruction = (
+                "These equations have already been tested (one entry per repeat): "
+                f"{json.dumps(duplicates)}. Suggest one different equation for each repeat, "
+                f"keeping the same idea. Return only a JSON array of exactly {len(duplicates)} replacements "
+                "in the original format."
+            )
+            retry = event["retry"] = {"instruction": instruction}
             try:
-                candidate = compile_equation(proposal)
-            except (ValueError, KeyError, TypeError, FloatingPointError, OverflowError) as exc:
-                record.update(status="invalid", error=str(exc))
-                continue
-            record["equation"] = candidate.text
-            if candidate.key in seen:
-                record["status"] = "duplicate"
-                continue
-            seen.add(candidate.key)
-            if node not in born:
-                born.add(node)
-                routes = idea.routes or (() if idea.lane == "root" else ((BASELINE_ID,),))
-                wave["graph"].append({**asdict(idea), "routes": routes, "introduced_at": step + 1})
-            try:
-                result = _measure(up, candidate, explore, max_iter)
-                record.update(status="fitted", metrics=result)
-                depth[idea.branch] += 1
-                if node not in references:
-                    references[node], metrics[node] = candidate, result
-                    lineage[node] = parents
-            except (ValueError, KeyError, TypeError, FloatingPointError, OverflowError) as exc:
-                record.update(status="fit_failed", error=str(exc))
+                retry["reply"] = await proposer.retry(batch, prompt, event["reply"], instruction)
+                replacements = _decode(retry["reply"], len(duplicates))
+            except ValueError as exc:
+                retry["error"] = str(exc)
+            else:
+                for replacement in replacements:
+                    evaluate(replacement, event, step, duplicates, retry=True)
         log.info("Frontier episode %s: %s (%s images)", step + 1, node, event.get("images"))
         del wave["active_probe"]
         wave["episodes"].append(event)
@@ -574,6 +642,8 @@ async def execute(
         for row in wave["graph"][1:]
     }
     if final is not None and supported:
+        wave["selection"] = {"status": "started"}
+        _write(path, wave)
         selection, locked = final
         scores = {"double_gaussian": _measure(up, _baseline(up), selection, max_iter)}
         for node in sorted(n for n in supported if supported_claim(n)):
@@ -600,9 +670,29 @@ class _Live:
     async def submit(self, batch, prompt):
         return await batch.submit(self.client, prompt, effort="none", temperature=0.5)
 
+    async def retry(self, batch, prompt, previous_reply, instruction):
+        return await batch.submit(
+            self.client, prompt, effort="none", temperature=0.5, followup=(previous_reply, instruction)
+        )
+
 
 def run(args):
     """Load the pinned recording and run one explicitly bounded, free-model wave."""
+    output = Path(args.output)
+    if args.resume:
+        if not (output / "manifest.json").is_file() or not (output / "wave.json").is_file():
+            raise SystemExit("Resume requires an existing run manifest and checkpoint.")
+    else:
+        output.mkdir(parents=True, exist_ok=False)
+    with (output / ".run.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise SystemExit("This run is already active.") from exc
+        _run(args, output)
+
+
+def _run(args, output):
     if min(args.waves, args.batches, args.k) < 1 or args.seed < 0:
         raise SystemExit("Use positive waves, batches and K and a nonnegative seed.")
     ideas = DEFAULT_IDEAS
@@ -630,23 +720,24 @@ def run(args):
     discovery = np.random.default_rng(881).permutation(groups["discovery"])
     cut = len(discovery) * 3 // 4
     explore, confirm = discovery[:cut], discovery[cut:]
-    output = Path(args.output)
-    output.mkdir(parents=True, exist_ok=False)
-    _write(
-        output / "manifest.json",
-        {
-            "dataset_sha256": sha,
-            "model": MODEL,
-            "seed": args.seed,
-            "discovery_partition_seed": 881,
-            "exploration_cells": indices["eligible_cell_ids"][explore].tolist(),
-            "confirmation_cells": indices["eligible_cell_ids"][confirm].tolist(),
-            "batches": args.batches,
-            "k": args.k,
-            "waves": args.waves,
-            "finalize": args.finalize,
-        },
-    )
+    manifest = {
+        "dataset_sha256": sha,
+        "model": MODEL,
+        "seed": args.seed,
+        "discovery_partition_seed": 881,
+        "exploration_cells": indices["eligible_cell_ids"][explore].tolist(),
+        "confirmation_cells": indices["eligible_cell_ids"][confirm].tolist(),
+        "batches": args.batches,
+        "k": args.k,
+        "waves": args.waves,
+        "finalize": args.finalize,
+    }
+    manifest_path = output / "manifest.json"
+    if args.resume:
+        if json.loads(manifest_path.read_text()) != manifest:
+            raise SystemExit("Resume requires the same dataset, split, and run options.")
+    else:
+        _write(manifest_path, manifest)
 
     def cohort(rows):
         return x[rows], y[rows]
@@ -667,6 +758,7 @@ def run(args):
                 final=final,
                 waves=args.waves,
                 ideas=ideas,
+                resume=args.resume,
             )
         finally:
             await go.close()
