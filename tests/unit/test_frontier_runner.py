@@ -12,7 +12,10 @@ from edgar_study.datasets import prepare, synthetic_recording
 from edgar_study.frontier_runner import (
     BASE,
     Idea,
+    InvalidReply,
     _baseline,
+    _generated_idea,
+    _generated_prompt,
     _measure,
     _trials,
     compile_equation,
@@ -500,6 +503,130 @@ def test_offline_wave_writes_audit_and_never_exposes_scores(tmp_path):
     assert json.loads((tmp_path / "wave.json").read_text()) == result
 
 
+def test_generated_idea_identity_uses_route_and_wording_not_mechanism():
+    existing = {
+        "idea-1": Idea(
+            "idea-1",
+            "single_idea",
+            "offset",
+            "Shift the m lobe only.",
+            (("double_gaussian",),),
+            "frontier",
+            "Directional peak shift",
+        )
+    }
+    choice = {"node": "idea-2", "mode": "single_idea", "parents": ["double_gaussian"], "lane": "frontier"}
+    distinct = _generated_idea(
+        {"title": "Shared separation offset", "mechanism": "offset", "change": "Move both lobes."},
+        choice,
+        existing,
+    )
+    assert distinct.label == "Shared separation offset"
+    with pytest.raises(InvalidReply, match="Existing ideas on this route: Directional peak shift"):
+        _generated_idea(
+            {"title": "directional peak shift", "mechanism": "width", "change": "Move both lobes."},
+            choice,
+            existing,
+        )
+
+
+def test_idea_description_allows_six_hundred_characters():
+    choice = {"node": "idea-2", "mode": "single_idea", "parents": [], "lane": "root"}
+    accepted = _generated_idea(
+        {"title": "Long change", "mechanism": "mixture", "change": "a" * 600}, choice, {}
+    )
+    assert accepted.text == "a" * 600
+    with pytest.raises(InvalidReply, match="at most 600"):
+        _generated_idea({"title": "Too long", "mechanism": "mixture", "change": "a" * 601}, choice, {})
+
+
+def test_revisit_prompt_lists_tried_equations_without_scores():
+    node = Idea(
+        "idea-1", "revisit", "width", "Split the widths.", (("double_gaussian",),), "frontier", "Widths"
+    )
+    prompt = _generated_prompt(
+        {"node": "idea-1", "kind": "revisit", "mode": "revisit", "parents": ["double_gaussian"]},
+        {"idea-1": node},
+        {},
+        4,
+        ("b + a*cos(theta)",),
+    )
+    assert "do not repeat" in prompt
+    assert "b + a*cos(theta)" in prompt
+    assert "score" not in prompt.lower()
+
+
+def test_six_parameter_standalone_equation_falls_back_when_offset_embedding_fails(tmp_path):
+    up = import_upstream(Path(__file__).resolve().parents[2])
+    angles = np.tile(np.linspace(0, 2 * np.pi, 48, endpoint=False), (10, 1))
+    responses = 2 + np.cos(angles) + 0.3 * np.cos(2 * angles)
+    proposal = {
+        "equation": "b + a*cos(theta) + c*cos(2*theta) + d*cos(3*theta) + e*sin(theta) + f*sin(2*theta)",
+        "initial": {"b": 2, "a": 1, "c": 0.3, "d": 0, "e": 0, "f": 0},
+    }
+
+    def objective(model, estimator, loss, x, y, **kwargs):
+        return None, None, 1.0, np.tile(np.array(estimator(x[0], y[0])), (len(x), 1))
+
+    up["hypothesis_engine"] = SimpleNamespace(objective=objective)
+
+    class Stub:
+        async def submit(self, batch, prompt):
+            return json.dumps(
+                {
+                    "idea": {"title": "Harmonic family", "mechanism": "offset", "change": "Use harmonics."},
+                    "equations": [proposal],
+                }
+            )
+
+        async def retry(self, batch, prompt, previous_reply, instruction):
+            return json.dumps([proposal])
+
+    result = asyncio.run(
+        execute(up, Stub(), (angles, responses), (angles, responses), tmp_path, batches=1, max_iter=0)
+    )
+    metrics = result["episodes"][0]["candidates"][0]["metrics"]
+    assert metrics["initialization"] == "estimator"
+    assert metrics["training_mse"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_unusable_probe_gets_one_retry_even_when_equations_only_fail_to_fit(tmp_path):
+    up = import_upstream(Path(__file__).resolve().parents[2])
+    angles = np.tile(np.linspace(0, 2 * np.pi, 48, endpoint=False), (10, 1))
+    responses = 2 + np.cos(angles)
+    calls = []
+
+    def objective(model, estimator, loss, x, y, **kwargs):
+        start = estimator(x[0], y[0])
+        if start[0] < 0:
+            return None, None, float("inf"), np.tile(np.array(start), (len(x), 1))
+        return None, None, 1.0, np.tile(np.array(start), (len(x), 1))
+
+    up["hypothesis_engine"] = SimpleNamespace(objective=objective)
+
+    class Stub:
+        async def submit(self, batch, prompt):
+            return json.dumps(
+                {
+                    "idea": {"title": "Harmonic", "mechanism": "harmonic", "change": "Add a cosine."},
+                    "equations": [{"equation": "b + a*cos(theta)", "initial": {"b": -1, "a": 1}}],
+                }
+            )
+
+        async def retry(self, batch, prompt, previous_reply, instruction):
+            calls.append(instruction)
+            return '[{"equation":"b+a*sin(theta+phi)","initial":{"b":2,"a":1,"phi":0}}]'
+
+    result = asyncio.run(
+        execute(up, Stub(), (angles, responses), (angles, responses), tmp_path, batches=1, max_iter=0)
+    )
+    event = result["episodes"][0]
+    assert len(calls) == 1
+    assert event["retry"]["reason_code"] == "no_usable_equation"
+    assert [row["status"] for row in event["candidates"]] == ["fit_failed", "fitted"]
+    assert "score" not in calls[0].lower()
+
+
 def test_tried_independent_root_can_be_probed_again():
     root = Idea("root", "peaks", "harmonic", "Use circular harmonics.", lane="root")
     choice = draw((root,), {}, {"root": 1}, np.random.default_rng(8))
@@ -525,6 +652,9 @@ def test_generated_idea_is_visible_without_equations_and_can_be_revisited_after_
             if not resume:
                 raise InterruptedError
             return json.dumps([proposal])
+
+        async def retry(self, batch, prompt, previous_reply, instruction):
+            return "[]"
 
     def run():
         return asyncio.run(

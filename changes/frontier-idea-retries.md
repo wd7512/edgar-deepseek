@@ -1,0 +1,1 @@
+Identify generated ideas by route and wording rather than a reused mechanism label, allow longer descriptions, fall back cleanly when a standalone equation is not a baseline offset, and retry any probe that yields no usable equation once.
