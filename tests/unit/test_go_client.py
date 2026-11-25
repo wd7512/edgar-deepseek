@@ -7,10 +7,11 @@ import os
 import types
 
 import httpx
+import pytest
 
 from edgar_study.engine import install
 from edgar_study.frontier.images import FrontierImages
-from edgar_study.go_client import BudgetExhausted, GoClient, Ledger, role
+from edgar_study.go_client import BudgetExhausted, GoClient, Ledger, load_key, role
 
 
 def fake_transport(replies, bodies):
@@ -202,3 +203,13 @@ async def check_blocked(directory):
 
 def test_each_call_records_how_long_the_event_loop_was_blocked_during_it(tmp_path):
     asyncio.run(check_blocked(tmp_path))
+
+
+def test_the_key_can_come_from_the_environments_stored_variable(monkeypatch):
+    for name in ("OPENCODE_API_KEY_FILE", "OPENCODE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("opencode_key", "stored-key")
+    assert load_key() == "stored-key"
+    monkeypatch.delenv("opencode_key")
+    with pytest.raises(RuntimeError, match="opencode_key"):
+        load_key()

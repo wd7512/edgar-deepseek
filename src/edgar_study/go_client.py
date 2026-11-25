@@ -17,6 +17,7 @@ from edgar_study.upstream import code_key
 BASE_URL = "https://opencode.ai/inference/go/openai/v1"
 USER_AGENT = "edgar-deepseek/0.1"
 SPEND_CAP_USD = 9.50
+STORED_KEY_VARIABLE = "opencode_key"
 
 # Set by wrappers around the upstream call sites, so each request records its role.
 role = contextvars.ContextVar("role", default="unknown")
@@ -30,9 +31,9 @@ def load_key():
     path = os.environ.get("OPENCODE_API_KEY_FILE")
     if path:
         return Path(path).read_text().strip()
-    key = os.environ.get("OPENCODE_API_KEY")
+    key = os.environ.get("OPENCODE_API_KEY") or os.environ.get(STORED_KEY_VARIABLE)
     if not key:
-        raise RuntimeError("Set OPENCODE_API_KEY_FILE (preferred) or OPENCODE_API_KEY.")
+        raise RuntimeError("Set OPENCODE_API_KEY_FILE (preferred), OPENCODE_API_KEY or opencode_key.")
     return key
 
 
