@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 
 from edgar_study import fitting
-from edgar_study.datasets import load_dataset, prepare
+from edgar_study.datasets import DISCOVERY_PARTITION_SEED, discovery_partition, load_dataset, prepare
 from edgar_study.frontier.fits import double_gaussian_parent, measure
 from edgar_study.frontier.grammar import InvalidEquation, compile_equation
 from edgar_study.frontier.ideas import Idea, draw, draw_generated, generated_idea, route_mode, validate_graph
@@ -21,7 +21,8 @@ from edgar_study.frontier.images import ParentFit, prepare_images
 from edgar_study.frontier.prompts import generated_prompt, idea_prompt
 from edgar_study.frontier.protocol import STARTS, solve
 from edgar_study.frontier.replies import InvalidReply, decode, decode_json, equation_list
-from edgar_study.frontier.seed import BASE, BASELINE_ID, baseline_node
+from edgar_study.frontier.seed import BASE, BASE_NAMES, BASE_PROBES, BASELINE_ID, baseline_node
+from edgar_study.frontier.warm import Parent, declared_probes, warm_start
 from edgar_study.go_client import GoClient, Ledger, fetch_models, is_free, load_key
 from edgar_study.upstream import import_upstream
 
@@ -75,7 +76,7 @@ async def execute(
     wave: dict[str, Any] = {
         "version": 3,
         "seed": seed,
-        "fit_protocol": "cold_multistart_v1",
+        "fit_protocol": "warm_multistart_v1",
         "idea_source": "generated" if discovery else "catalog",
         "idea_catalog": [asdict(i) for i in ideas],
         "graph": [baseline_node()],
@@ -170,19 +171,43 @@ async def execute(
         wave["status"] = "exploring"
     wave["config"] = config
     _write(path, wave)
-    baseline_fit = double_gaussian_parent(up)
+    baseline_fit = double_gaussian_parent(up, starts)
     if "baseline_exploration" not in wave:
         wave["baseline_exploration"] = measure(baseline_fit.model, baseline_fit.solve, explore, max_iter)
+
+    fitted_parents: dict[tuple, tuple] = {}
+
+    def parent_params(node, cohort, max_iter):
+        key = (node, id(cohort[0]), id(cohort[1]), max_iter)
+        if key not in fitted_parents:
+            run = baseline_fit.solve if node == BASELINE_ID else solver(references[node], lineage[node])
+            fitted_parents[key] = (cohort, run(cohort, max_iter)[3])
+        return fitted_parents[key][1]
+
+    def parent_link(node):
+        if node == BASELINE_ID:
+            names, model, probes = BASE_NAMES, baseline_fit.model, np.array(BASE_PROBES)
+        else:
+            equation = references[node]
+            names, model, probes = tuple(equation.initial), equation.model, declared_probes(equation)
+        return Parent(node, names, model, probes, partial(parent_params, node))
+
+    def solver(equation, parents):
+        def fit(cohort, max_iter):
+            warm = warm_start(equation, [parent_link(p) for p in parents], cohort, max_iter)
+            return solve(equation, cohort, max_iter, starts=starts, warm=warm)
+
+        return fit
 
     @cache
     def reference_fit(node):
         if node == BASELINE_ID:
             return baseline_fit
         candidate = references[node]
-        return ParentFit(node, candidate.model, candidate.estimator, partial(solve, candidate, starts=starts))
+        return ParentFit(node, candidate.model, candidate.estimator, solver(candidate, tuple(lineage[node])))
 
-    def measure_node(equation, cohort):
-        return measure(equation.model, partial(solve, equation, starts=starts), cohort, max_iter)
+    def measure_node(equation, cohort, parents):
+        return measure(equation.model, solver(equation, tuple(parents)), cohort, max_iter)
 
     def evaluate(proposal, event, step, *, replaces=None, replacement=False):
         node, parents = event["node"], event["parents"]
@@ -210,7 +235,7 @@ async def execute(
             routes = idea.routes or (() if idea.lane == "root" else ((BASELINE_ID,),))
             wave["graph"].append({**asdict(idea), "routes": routes, "introduced_at": step + 1})
         try:
-            result = measure_node(candidate, explore)
+            result = measure_node(candidate, explore, parents)
             record.update(status="fitted", metrics=result)
             depth[idea.branch] += 1
             if node not in references:
@@ -275,7 +300,7 @@ async def execute(
 
         try:
             batch = prepare_images(up, *explore, seed=event["image_seed"], parents=fitted, max_iter=max_iter)
-            event.update(cells=list(batch.cells), images=len(batch.images))
+            event.update(cells=list(batch.cells), images=batch.count)
             event["reply"] = await proposer.submit(batch, prompt)
             proposals = decode_probe(event["reply"], event, step)
         except InvalidReply as exc:
@@ -377,7 +402,7 @@ async def execute(
     for node, eq in references.items():
         row = {"node": node}
         try:
-            result = measure_node(eq, confirm)
+            result = measure_node(eq, confirm, lineage[node])
             measured[node] = result
             comparators = {
                 BASELINE_ID: baseline,
@@ -414,7 +439,7 @@ async def execute(
         scores = {"double_gaussian": measure(baseline_fit.model, baseline_fit.solve, selection, max_iter)}
         for node in sorted(n for n in supported if supported_claim(n)):
             try:
-                scores[node] = measure_node(references[node], selection)
+                scores[node] = measure_node(references[node], selection, lineage[node])
             except ValueError:
                 continue
         winner = min(scores, key=lambda name: (scores[name]["score"], name))
@@ -423,7 +448,7 @@ async def execute(
         locked_baseline = measure(baseline_fit.model, baseline_fit.solve, locked, max_iter)
         wave["locked"] = {"double_gaussian": locked_baseline}
         if winner != "double_gaussian":
-            wave["locked"][winner] = measure_node(references[winner], locked)
+            wave["locked"][winner] = measure_node(references[winner], locked, lineage[winner])
     wave["status"] = "complete"
     _write(path, wave)
     return json.loads(path.read_text())
@@ -486,14 +511,12 @@ def _run(args, output):
     fitting.install(up["hypothesis_engine"], "lm-bounded")
     response, angles, sha = load_dataset(args.dataset, up["utils"].extract_stimulus_related_response)
     x, y, groups, indices = prepare(response, angles, "strict-holdout-v1")
-    discovery = np.random.default_rng(881).permutation(groups["discovery"])
-    cut = len(discovery) * 3 // 4
-    explore, confirm = discovery[:cut], discovery[cut:]
+    explore, confirm = discovery_partition(groups)
     manifest = {
         "dataset_sha256": sha,
         "model": MODEL,
         "seed": args.seed,
-        "discovery_partition_seed": 881,
+        "discovery_partition_seed": DISCOVERY_PARTITION_SEED,
         "exploration_cells": indices["eligible_cell_ids"][explore].tolist(),
         "confirmation_cells": indices["eligible_cell_ids"][confirm].tolist(),
         "batches": args.batches,

@@ -1,0 +1,123 @@
+{
+  "about": "Equations from the frontier runs whose nesting is proven: fixing some of a child's parameters gives its parent exactly. Each map gives every child parameter as a parent parameter name, a number, or [name, scale, shift]. Equations are listed so every parent used for a warm start comes first.",
+  "equations": [
+    {
+      "id": "G5",
+      "source": "seed: double Gaussian",
+      "equation": "b + a1*exp(-0.5*(wrap(theta-m)/s)**2) + a2*exp(-0.5*(wrap(theta-m-pi)/s)**2)",
+      "initial": {"b": 0.4, "a1": 3.0, "a2": 1.5, "m": 2.7, "s": 0.25}
+    },
+    {
+      "id": "L5",
+      "source": "run-20 idea-2",
+      "equation": "b + a1*exp(-abs(wrap(theta-m))/s) + a2*exp(-abs(wrap(theta-m-pi))/s)",
+      "initial": {"b": 0.4, "a1": 3.0, "a2": 1.5, "m": 2.8, "s": 0.25}
+    },
+    {
+      "id": "W6",
+      "source": "run-cold-10 idea-1",
+      "equation": "b + a1*exp(-0.5*(wrap(theta-m)/s1)**2) + a2*exp(-0.5*(wrap(theta-m-pi)/s2)**2)",
+      "initial": {"b": 0.4, "a1": 4.0, "a2": 1.8, "m": 1.9, "s1": 0.22, "s2": 0.35}
+    },
+    {
+      "id": "W6b",
+      "source": "run-20 idea-13",
+      "equation": "b + a1*exp(-0.5*(wrap(theta-m)/s1)**2) + a2*exp(-0.5*(wrap(theta-(m+pi))/s2)**2)",
+      "initial": {"b": 0.3, "a1": 3.0, "a2": 2.0, "m": 1.0, "s1": 0.25, "s2": 0.25}
+    },
+    {
+      "id": "S7",
+      "source": "run-20 idea-9",
+      "equation": "b + a1*exp(-0.5*(wrap(theta-(m+d1))/s)**2) + a2*exp(-0.5*(wrap(theta-(m+pi+d2))/s)**2)",
+      "initial": {"b": 0.3, "a1": 3.0, "a2": 1.5, "m": 2.8, "s": 0.18, "d1": 0.0, "d2": 0.0}
+    },
+    {
+      "id": "K7",
+      "source": "run-20 idea-10",
+      "equation": "b + a1*exp(-0.5*(wrap(theta-m)/(s*(1+k1*cos(wrap(theta-m)))))**2) + a2*exp(-0.5*(wrap(theta-m-pi)/(s*(1+k2*cos(wrap(theta-m-pi)))))**2)",
+      "initial": {"m": 2.8, "b": 0.3, "a1": 4.0, "a2": 1.5, "s": 0.25, "k1": 0.2, "k2": 0.2}
+    },
+    {
+      "id": "T7",
+      "source": "run-20 idea-1",
+      "equation": "b + a1*exp(-0.5*(wrap(theta-m)/(s*(1+k*tanh(wrap(theta-m)/t))))**2) + a2*exp(-0.5*(wrap(theta-m-pi)/(s*(1+k*tanh(wrap(theta-m-pi)/t))))**2)",
+      "initial": {"b": 0.4, "a1": 4.0, "a2": 1.8, "m": 2.7, "s": 0.22, "k": 0.35, "t": 0.25}
+    },
+    {
+      "id": "GG7",
+      "source": "run-cold-10 idea-9",
+      "equation": "b + a1*exp(-abs(wrap(theta-m)/s)**p1) + a2*exp(-abs(wrap(theta-m-pi)/s)**p2)",
+      "initial": {"b": 0.4, "a1": 4.0, "a2": 1.5, "m": 2.0, "s": 0.25, "p1": 2.0, "p2": 2.0}
+    },
+    {
+      "id": "SK8",
+      "source": "run-cold-10 idea-7",
+      "equation": "b + a1*exp(-0.5*(wrap(theta-m)/s1)**2)*(1+tanh(k1*wrap(theta-m)/s1)) + a2*exp(-0.5*(wrap(theta-m-pi)/s2)**2)*(1+tanh(k2*wrap(theta-m-pi)/s2))",
+      "initial": {"b": 0.3, "a1": 4.0, "m": 5.5, "s1": 0.2, "k1": 0.5, "a2": 1.5, "s2": 0.25, "k2": 0.5}
+    },
+    {
+      "id": "SW8",
+      "source": "run-cold-10 idea-2",
+      "equation": "b + a1*exp(-0.5*(wrap(theta-m-dm1)/s1)**2) + a2*exp(-0.5*(wrap(theta-m-pi-dm2)/s2)**2)",
+      "initial": {"b": 0.4, "a1": 3.0, "a2": 1.5, "m": 2.7, "dm1": 0.0, "dm2": 0.0, "s1": 0.25, "s2": 0.25}
+    },
+    {
+      "id": "SK9",
+      "source": "run-20 idea-12",
+      "equation": "b + a1*exp(-0.5*(wrap(theta-(m+d1))/(s*(1+k1*cos(wrap(theta-(m+d1))))))**2) + a2*exp(-0.5*(wrap(theta-(m+pi+d2))/(s*(1+k2*cos(wrap(theta-(m+pi+d2))))))**2)",
+      "initial": {"b": 0.4, "a1": 3.0, "a2": 2.0, "m": 1.2, "s": 0.35, "d1": 0.0, "d2": 0.0, "k1": 0.2, "k2": 0.2}
+    },
+    {
+      "id": "SKQ11",
+      "source": "run-20 idea-15",
+      "equation": "b + a1*exp(-0.5*(wrap(theta-(m+d1))/(s*(1+k1*cos(wrap(theta-(m+d1)))+q1*sin(wrap(theta-(m+d1))))))**2) + a2*exp(-0.5*(wrap(theta-(m+pi+d2))/(s*(1+k2*cos(wrap(theta-(m+pi+d2)))+q2*sin(wrap(theta-(m+pi+d2))))))**2)",
+      "initial": {"b": 0.4, "a1": 4.0, "a2": 1.8, "m": 1.7, "d1": 0.0, "d2": 0.0, "s": 0.25, "k1": 0.0, "k2": 0.0, "q1": 0.0, "q2": 0.0}
+    },
+    {
+      "id": "SKP10",
+      "source": "run-20 idea-19",
+      "equation": "b + a1*exp(-0.5*abs(wrap(theta-(m+d1))/(s*(1+k1*cos(wrap(theta-(m+d1))))))**(2+q*cos(wrap(theta-(m+d1))))) + a2*exp(-0.5*abs(wrap(theta-(m+pi+d2))/(s*(1+k2*cos(wrap(theta-(m+pi+d2))))))**(2+q*cos(wrap(theta-(m+pi+d2)))))",
+      "initial": {"b": 0.4, "a1": 4.0, "a2": 1.5, "m": 1.8, "d1": 0.0, "d2": 0.0, "s": 0.25, "k1": 0.0, "k2": 0.0, "q": 0.0}
+    },
+    {
+      "id": "GS10",
+      "source": "run-20 idea-14",
+      "equation": "b + a1*exp(-abs(wrap(theta-(m+d1))/s1)**p1) + a2*exp(-abs(wrap(theta-(m+pi+d2))/s2)**p2)",
+      "initial": {"b": 0.3, "a1": 3.0, "a2": 2.0, "m": 1.0, "d1": 0.0, "d2": 0.0, "s1": 0.35, "s2": 0.35, "p1": 2.0, "p2": 2.0}
+    },
+    {
+      "id": "L6",
+      "source": "run-20 idea-2 (revisit)",
+      "equation": "b + a1*exp(-abs(wrap(theta-m))/s1) + a2*exp(-abs(wrap(theta-m-pi))/s2)",
+      "initial": {"b": 0.4, "a1": 3.0, "a2": 1.5, "m": 2.7, "s1": 0.25, "s2": 0.35}
+    },
+    {
+      "id": "L8",
+      "source": "run-20 idea-4",
+      "equation": "b + a1*exp(-(abs(wrap(theta-m))/s1)**p1) + a2*exp(-(abs(wrap(theta-m-pi))/s2)**p2)",
+      "initial": {"b": 0.3, "a1": 4.0, "a2": 2.0, "m": 0.0, "s1": 0.25, "s2": 0.25, "p1": 1.0, "p2": 1.0}
+    }
+  ],
+  "edges": [
+    {"child": "W6", "parent": "G5", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s1": "s", "s2": "s"}},
+    {"child": "W6b", "parent": "W6", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s1": "s1", "s2": "s2"}},
+    {"child": "W6", "parent": "W6b", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s1": "s1", "s2": "s2"}},
+    {"child": "S7", "parent": "G5", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s": "s", "d1": 0.0, "d2": 0.0}},
+    {"child": "K7", "parent": "G5", "map": {"m": "m", "b": "b", "a1": "a1", "a2": "a2", "s": "s", "k1": 0.0, "k2": 0.0}},
+    {"child": "T7", "parent": "G5", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s": "s", "k": 0.0, "t": 1.0}},
+    {"child": "GG7", "parent": "G5", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s": ["s", 1.4142135623730951, 0.0], "p1": 2.0, "p2": 2.0}},
+    {"child": "SK8", "parent": "W6", "map": {"b": "b", "a1": "a1", "m": "m", "s1": "s1", "k1": 0.0, "a2": "a2", "s2": "s2", "k2": 0.0}},
+    {"child": "SW8", "parent": "W6", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "dm1": 0.0, "dm2": 0.0, "s1": "s1", "s2": "s2"}},
+    {"child": "SW8", "parent": "S7", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "dm1": "d1", "dm2": "d2", "s1": "s", "s2": "s"}},
+    {"child": "SK9", "parent": "S7", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s": "s", "d1": "d1", "d2": "d2", "k1": 0.0, "k2": 0.0}},
+    {"child": "SK9", "parent": "K7", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s": "s", "d1": 0.0, "d2": 0.0, "k1": "k1", "k2": "k2"}},
+    {"child": "SKQ11", "parent": "SK9", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "d1": "d1", "d2": "d2", "s": "s", "k1": "k1", "k2": "k2", "q1": 0.0, "q2": 0.0}},
+    {"child": "SKP10", "parent": "SK9", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "d1": "d1", "d2": "d2", "s": "s", "k1": "k1", "k2": "k2", "q": 0.0}},
+    {"child": "GS10", "parent": "S7", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "d1": "d1", "d2": "d2", "s1": ["s", 1.4142135623730951, 0.0], "s2": ["s", 1.4142135623730951, 0.0], "p1": 2.0, "p2": 2.0}},
+    {"child": "GS10", "parent": "GG7", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "d1": 0.0, "d2": 0.0, "s1": "s", "s2": "s", "p1": "p1", "p2": "p2"}},
+    {"child": "L6", "parent": "L5", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s1": "s", "s2": "s"}},
+    {"child": "L8", "parent": "L6", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s1": "s1", "s2": "s2", "p1": 1.0, "p2": 1.0}},
+    {"child": "L8", "parent": "GG7", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s1": "s", "s2": "s", "p1": "p1", "p2": "p2"}},
+    {"child": "L8", "parent": "W6", "map": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s1": ["s1", 1.4142135623730951, 0.0], "s2": ["s2", 1.4142135623730951, 0.0], "p1": 2.0, "p2": 2.0}}
+  ]
+}

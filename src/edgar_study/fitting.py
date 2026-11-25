@@ -266,14 +266,20 @@ def fit_lm_bounded(
     max_step=LM_BOUNDED_MAX_STEP,
     tolerance=LM_BOUNDED_TOLERANCE,
     max_iterations=LM_ITERATIONS,
+    relative_step=False,
 ):
     """Levenberg–Marquardt with each parameter's move capped at `max_step` per iteration.
+
+    With `relative_step`, the cap is `max_step * (1 + |parameter|)`, so large parameters can travel far
+    while parameters near zero keep the same cap.
 
     A cell stops once an accepted step lowers its squared error by less than `tolerance` of the
     current error, or once its damping saturates; the loop ends when every cell has stopped or after
     `max_iterations`. Returns the fitted parameters, the iterations run and how many cells stopped
     (by tolerance or saturated damping) before the iteration cap.
     """
+    if max_iterations < 1:
+        return BoundedFit(np.asarray(params), 0, 0)
     (params, x, y), _, n_cells = _shard(params, x, y)
     cost, lm_step = _least_squares(model, x, y)
 
@@ -284,9 +290,10 @@ def fit_lm_bounded(
     def body(state):
         i, p, damping, c, done = state
         step = lm_step(p, damping)
-        biggest = jnp.max(jnp.abs(step), axis=1, keepdims=True)
-        capped = biggest[:, 0] > max_step
-        candidate = p + step * jnp.minimum(1.0, max_step / jnp.maximum(biggest, 1e-30))
+        limit = max_step * (1 + jnp.abs(p)) if relative_step else max_step
+        biggest = jnp.max(jnp.abs(step) / limit, axis=1, keepdims=True)
+        capped = biggest[:, 0] > 1
+        candidate = p + step * jnp.minimum(1.0, 1 / jnp.maximum(biggest, 1e-30))
         new_cost = cost(candidate)
         accept = ~done & (new_cost < c)
         converged = (accept & (c - new_cost <= tolerance * c)) | (damping >= MAX_DAMPING)
@@ -333,7 +340,28 @@ def fit_multistart(
     """Run `fit_lm_bounded` from `params` and `starts - 1` perturbed copies of it, all in one batch,
     and keep each cell's fit with the lowest squared error. The first start is `params` itself, so a
     cell never ends worse than a single bounded fit from the same start; ties go to it."""
-    candidates = perturbed_starts(params, starts, seed)
+    return fit_from_starts(
+        model,
+        perturbed_starts(params, starts, seed),
+        x,
+        y,
+        max_iterations=max_iterations,
+        tolerance=tolerance,
+    )
+
+
+def fit_from_starts(
+    model,
+    candidates,
+    x,
+    y,
+    max_iterations=LM_ITERATIONS,
+    tolerance=LM_BOUNDED_TOLERANCE,
+    relative_step=False,
+):
+    """Fit from every start in `candidates` (starts, cells, parameters) and keep each cell's lowest-error
+    fit; ties go to the earliest start."""
+    candidates = np.asarray(candidates)
     k, cells, n = candidates.shape
     x_all, y_all = np.tile(np.asarray(x), (k, 1)), np.tile(np.asarray(y), (k, 1))
     fit = fit_lm_bounded(
@@ -343,6 +371,7 @@ def fit_multistart(
         y_all,
         tolerance=tolerance,
         max_iterations=max_iterations,
+        relative_step=relative_step,
     )
     log.info(
         "multi-start ran %d iterations; %d of %d fits stopped before the cap",

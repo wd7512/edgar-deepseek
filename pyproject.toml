@@ -60,7 +60,7 @@ extra-paths = ["src/edgar_upstream"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra --durations=10"
 timeout = 300
 
 [tool.devtools.gate]

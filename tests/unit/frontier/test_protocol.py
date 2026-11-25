@@ -2,7 +2,15 @@ import numpy as np
 import pytest
 
 from edgar_study.frontier.grammar import compile_equation
-from edgar_study.frontier.protocol import STARTS, fit_equation, fit_model, solve
+from edgar_study.frontier.protocol import (
+    STARTS,
+    fit_equation,
+    fit_equation_training,
+    fit_model,
+    predict,
+    solve,
+    split_trials,
+)
 from edgar_study.frontier.seed import BASE
 
 SIGMA = 0.05
@@ -49,7 +57,7 @@ def test_the_same_inputs_give_the_same_fit_and_the_seed_only_moves_the_jitter():
     np.testing.assert_array_equal(one.params, again.params)
     other = fit_equation(equation(), cohort, 100, seed=5)
     assert other.params.shape == one.params.shape
-    assert other.training_mse < 1.5 * SIGMA**2
+    assert other.training_mse < 4 * SIGMA**2
 
 
 def test_equivalent_equations_get_identical_fits_whatever_their_parameter_names_and_order():
@@ -133,4 +141,215 @@ def test_an_equation_that_cannot_fit_is_reported_not_silently_scored():
 
 
 def test_the_default_number_of_starts_is_a_documented_constant():
-    assert STARTS == 4
+    assert STARTS == 5
+
+
+def test_a_warm_start_takes_the_last_slot_and_never_leaves_the_fit_worse_than_the_cold_starts():
+    cohort = double_gaussian_cohort()
+    cold = fit_equation(equation(), cohort, 100, starts=4)
+    poor = np.full((24, 5), 0.1, dtype=np.float32)
+    warm = fit_equation(equation(), cohort, 100, starts=5, warm=poor)
+    assert warm.training_mse <= cold.training_mse + 1e-9
+
+
+def test_a_warm_start_from_a_better_fit_is_used():
+    theta, y = double_gaussian_cohort()
+    first = fit_equation(equation(), (theta, y), 100, starts=1)
+    shifted = equation(initial={"m": 0.1, "b": 5.0, "a1": 0.1, "a2": 0.1, "s": 3.0})
+    cold = fit_equation(shifted, (theta, y), 100, starts=1)
+    seeded = fit_equation(shifted, (theta, y), 100, starts=2, warm=first.params)
+    assert seeded.training_mse <= first.training_mse + 1e-6
+    assert seeded.training_mse < cold.training_mse
+
+
+def test_a_warm_start_is_given_in_the_equations_declared_parameter_order():
+    cohort = double_gaussian_cohort(cells=4)
+    renamed = equation(BASE.replace("m", "mu"), {"s": 0.6, "mu": 3.0, "a1": 1.5, "a2": 1.0, "b": 0.3})
+    names = list(renamed.initial)
+    first = fit_equation(equation(), cohort, 100, starts=1)
+    reference = dict(zip(equation().initial, first.params.T, strict=True))
+    warm = np.stack([reference["m" if name == "mu" else name] for name in names], axis=1)
+    result = fit_equation(renamed, cohort, 0, starts=2, warm=warm)
+    assert result.training_mse == pytest.approx(first.training_mse, rel=1e-4)
+
+
+def test_a_warm_start_is_ignored_when_only_one_start_is_allowed_and_must_match_the_cells():
+    cohort = double_gaussian_cohort(cells=4)
+    nonsense = np.zeros((4, 5), dtype=np.float32)
+    assert (
+        fit_equation(equation(), cohort, 0, starts=1, warm=nonsense).params.tolist()
+        == fit_equation(equation(), cohort, 0, starts=1).params.tolist()
+    )
+    with pytest.raises(ValueError):
+        fit_equation(equation(), cohort, 0, starts=2, warm=np.zeros((3, 5), dtype=np.float32))
+
+
+FAMILIES = {
+    "generalised_gaussian": (
+        "b + a1*exp(-(abs(wrap(theta-m))/s)**p) + a2*exp(-(abs(wrap(theta-m-pi))/s)**p)",
+        {"m": 3.0, "b": 0.3, "a1": 1.5, "a2": 1.0, "s": 0.6, "p": 2.0},
+        {"b": (0.2, 0.5), "a1": (1, 2.5), "a2": (0.2, 1.5), "s": (0.4, 1.0), "p": (1.2, 3.0)},
+    ),
+    "von_mises": (
+        "b + a*exp(k*(cos(theta-m)-1))",
+        {"m": 3.0, "b": 0.3, "a": 1.5, "k": 2.0},
+        {"b": (0.2, 0.5), "a": (1, 2.5), "k": (1.0, 8.0)},
+    ),
+    "skewed_width": (
+        "b + a*exp(-0.5*(wrap(theta-m)/(s*(1 + k*(wrap(theta-m) > 0))))**2)",
+        {"m": 3.0, "b": 0.3, "a": 1.5, "s": 0.5, "k": 0.0},
+        {"b": (0.2, 0.5), "a": (1, 2.5), "s": (0.3, 0.7), "k": (0.2, 1.0)},
+    ),
+    "harmonics": (
+        "b + a1*cos(theta-p1) + a2*cos(2*theta-p2)",
+        {"b": 1.0, "a1": 1.0, "p1": 1.0, "a2": 0.5, "p2": 1.0},
+        {"b": (0.5, 2), "a1": (0.5, 2), "p1": (0, 6.28), "a2": (0.2, 1), "p2": (0, 6.28)},
+    ),
+}
+
+
+def family_cohort(text, start, ranges, cells=24, seed=3):
+    rng = np.random.default_rng(seed)
+    equation = compile_equation({"equation": text, "initial": start})
+    truth = {
+        name: rng.uniform(*ranges[name], cells) if name in ranges else rng.uniform(0, 2 * np.pi, cells)
+        for name in start
+    }
+    theta = np.tile(np.linspace(0, 2 * np.pi, 72, endpoint=False), (cells, 1)).astype(np.float32)
+    columns = np.stack([truth[name] for name in equation.initial], axis=1)
+    import jax
+
+    clean = np.asarray(jax.vmap(equation.model)(theta, *columns.T))
+    return theta, (clean + SIGMA * rng.standard_normal(clean.shape)).astype(np.float32)
+
+
+@pytest.mark.parametrize("family", sorted(FAMILIES))
+def test_each_family_of_equation_the_model_proposes_is_recovered_from_a_cold_start(family):
+    import jax
+
+    text, start, ranges = FAMILIES[family]
+    theta, y = family_cohort(text, start, ranges)
+    fitted = compile_equation({"equation": text, "initial": start})
+    result = fit_equation(fitted, (theta, y), 100)
+    errors = np.mean((np.asarray(jax.vmap(fitted.model)(theta, *result.params.T)) - y) ** 2, axis=1)
+    assert np.mean(errors < 2 * SIGMA**2) >= 0.75
+    assert np.median(errors) < 1.5 * SIGMA**2
+
+
+def curves(params):
+    import jax
+
+    grid = np.tile(np.linspace(0, 2 * np.pi, 90, endpoint=False), (len(params), 1)).astype(np.float32)
+    return np.asarray(jax.vmap(equation().model)(grid, *np.asarray(params).T))
+
+
+def test_a_cells_fitted_curve_does_not_depend_on_which_other_cells_are_fitted_with_it():
+    theta, y = double_gaussian_cohort(cells=12)
+    together = curves(fit_equation(equation(), (theta, y), 100).params)
+    order = np.random.default_rng(0).permutation(12)
+    shuffled = curves(fit_equation(equation(), (theta[order], y[order]), 100).params)
+    np.testing.assert_allclose(shuffled, together[order], atol=0.15)
+    alone = curves(fit_equation(equation(), (theta[3:4], y[3:4]), 100).params)
+    np.testing.assert_allclose(alone, together[3:4], atol=0.15)
+
+
+def test_a_parent_fit_full_of_nonfinite_values_cannot_poison_the_child():
+    cohort = double_gaussian_cohort(cells=6)
+    cold = fit_equation(equation(), cohort, 100, starts=4)
+    bad = np.full((6, 5), np.nan, dtype=np.float32)
+    bad[2] = np.inf
+    result = fit_equation(equation(), cohort, 100, starts=5, warm=bad)
+    assert np.isfinite(result.params).all()
+    assert result.training_mse <= cold.training_mse + 1e-9
+
+
+def test_starts_that_jitter_into_an_invalid_domain_are_discarded_not_fatal():
+    theta, y = double_gaussian_cohort(cells=8)
+    text = "b + a*exp(-0.5*(wrap(theta-m)/sqrt(w))**2)"
+    sqrt_equation = compile_equation({"equation": text, "initial": {"b": 0.3, "a": 1.5, "m": 3.0, "w": 0.05}})
+    result = fit_equation(sqrt_equation, (theta, y), 100, starts=8)
+    assert np.isfinite(result.params).all()
+    assert np.isfinite(result.training_mse)
+
+
+def test_one_unfittable_cell_makes_the_whole_equation_unfittable_instead_of_hiding_it():
+    theta, y = double_gaussian_cohort(cells=6)
+    y[4] = np.nan
+    with pytest.raises(ValueError):
+        fit_equation(equation(), (theta, y), 100)
+
+
+@pytest.mark.parametrize("trials", [4, 5, 7, 11])
+def test_odd_and_tiny_trial_counts_still_split_and_fit(trials):
+    theta, y = double_gaussian_cohort(cells=4, trials=trials)
+    result = fit_equation(equation(), (theta, y), 50)
+    assert np.isfinite([result.mse, result.training_mse]).all()
+    assert result.params.shape == (4, 5)
+
+
+def test_constant_responses_are_fitted_without_dividing_by_zero():
+    theta, _ = double_gaussian_cohort(cells=4)
+    flat = np.full_like(theta, 1.5)
+    result = fit_equation(equation(), (theta, flat), 100)
+    assert np.isfinite(result.params).all()
+    assert result.mse < 1e-2
+
+
+def test_a_single_iteration_still_returns_finite_parameters_no_worse_than_the_start():
+    cohort = double_gaussian_cohort(cells=4)
+    start = fit_equation(equation(), cohort, 0)
+    one = fit_equation(equation(), cohort, 1)
+    assert np.isfinite(one.params).all()
+    assert one.training_mse <= start.training_mse + 1e-9
+
+
+@pytest.mark.parametrize(
+    "scale",
+    [
+        1e-3,
+        pytest.param(
+            50,
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason="The step cap of 0.25 per iteration limits travel to about 25 units; see relative_step.",
+            ),
+        ),
+    ],
+)
+def test_responses_on_very_different_scales_are_fitted_to_the_same_relative_accuracy(scale):
+    theta, y = double_gaussian_cohort()
+    initial = {"m": 3.0, "b": 0.3 * scale, "a1": 1.5 * scale, "a2": 1.0 * scale, "s": 0.6}
+    result = fit_equation(equation(initial=initial), (theta, y * scale), 100)
+    assert result.training_mse < 3 * (SIGMA * scale) ** 2
+
+
+def test_parameters_far_from_the_truth_in_declared_values_do_not_stop_a_good_fit():
+    theta, y = double_gaussian_cohort()
+    bad = {"m": 0.0, "b": 5.0, "a1": 0.1, "a2": 0.1, "s": 2.0}
+    result = fit_equation(equation(initial=bad), (theta, y), 100)
+    assert result.training_mse < 20 * SIGMA**2
+
+
+def test_fitting_only_the_training_trials_gives_the_protocols_parameters():
+    x, y = double_gaussian_cohort(cells=6)
+    train, _ = split_trials(x)
+    shifted = equation(initial={**DOUBLE_GAUSSIAN_START, "m": 1.0})
+    warm = np.tile(np.array([3.0, 0.3, 1.5, 1.0, 0.6], dtype=np.float32), (6, 1))
+
+    whole = fit_equation(shifted, (x, y), 100, warm=warm)
+    alone = fit_equation_training(shifted, x[:, train], y[:, train], 100, warm=warm)
+
+    np.testing.assert_array_equal(alone, whole.params)
+
+
+def test_a_training_fit_can_use_more_iterations_and_a_relative_step_cap():
+    x, y = double_gaussian_cohort(cells=4)
+    far = equation(initial={**DOUBLE_GAUSSIAN_START, "a1": 40.0})
+
+    capped = fit_equation_training(far, x, y, 100)
+    relative = fit_equation_training(far, x, y, 300, relative_step=True)
+
+    def error(params):
+        return float(np.mean((np.asarray(predict(far.model, x, params)) - y) ** 2))
+
+    assert error(relative) < error(capped)

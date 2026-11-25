@@ -160,3 +160,56 @@ def test_multistart_logs_how_many_fits_hit_the_iteration_cap(caplog):
         fitting.fit_multistart(_cosine, start, theta, y, starts=3, max_iterations=1)
 
     assert any("of 18 fits stopped before the cap" in record.getMessage() for record in caplog.records)
+
+
+def test_explicit_starts_give_the_same_result_as_generated_starts():
+    theta, y, start = _cosine_cells()
+    generated = fitting.fit_multistart(_cosine, start, theta, y, starts=4, seed=3)
+    explicit = fitting.fit_from_starts(_cosine, fitting.perturbed_starts(start, 4, 3), theta, y)
+    np.testing.assert_array_equal(generated.params, explicit.params)
+    np.testing.assert_array_equal(generated.best_start, explicit.best_start)
+
+
+def test_a_supplied_start_can_be_chosen_per_cell():
+    theta, y, start = _cosine_cells()
+    good = np.tile(np.array([0.0, 1.0], dtype=np.float32), (6, 1))
+    fit = fitting.fit_from_starts(_cosine, np.stack([start, good]), theta, y, max_iterations=0)
+    assert np.all(fit.best_start == 1)
+    np.testing.assert_allclose(fit.params, good)
+
+
+def _scaled_cosine(theta, phi, a):
+    import jax.numpy as jnp
+
+    return a * jnp.cos(theta - phi)
+
+
+def test_an_absolute_step_cap_cannot_reach_a_distant_amplitude_but_a_relative_cap_can():
+    theta = np.tile(np.linspace(0, 2 * np.pi, 72, endpoint=False, dtype=np.float32), (4, 1))
+    y = (60 * np.cos(theta - 1.0)).astype(np.float32)
+    start = np.tile(np.array([1.0, 2.0], dtype=np.float32), (4, 1))
+
+    absolute = fitting.fit_lm_bounded(_scaled_cosine, start, theta, y).params
+    relative = fitting.fit_lm_bounded(_scaled_cosine, start, theta, y, relative_step=True).params
+
+    def error(params):
+        return np.mean((np.asarray(_scaled_cosine(theta, params[:, :1], params[:, 1:])) - y) ** 2, axis=1)
+
+    assert np.all(error(absolute) > 100)
+    assert np.all(error(relative) < 1e-2)
+
+
+def test_the_relative_cap_leaves_small_parameters_with_the_same_step_cap_as_before():
+    theta, y, start = _cosine_cells()
+    start = np.zeros_like(start) + np.float32(0.1)
+    base = fitting.fit_lm_bounded(_cosine, start, theta, y, max_iterations=1).params
+    relative = fitting.fit_lm_bounded(_cosine, start, theta, y, max_iterations=1, relative_step=True).params
+    assert np.all(np.abs(base - start) <= 0.25 + 1e-6)
+    assert np.all(np.abs(relative - start) <= 0.25 * 1.1 + 1e-6)
+
+
+def test_with_no_iterations_allowed_the_starts_come_back_unchanged():
+    theta, y, start = _cosine_cells()
+    fit = fitting.fit_lm_bounded(_cosine, start, theta, y, max_iterations=0)
+    np.testing.assert_array_equal(fit.params, start)
+    assert (fit.iterations, fit.stopped) == (0, 0)

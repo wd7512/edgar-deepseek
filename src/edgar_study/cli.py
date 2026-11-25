@@ -221,10 +221,28 @@ def main():
         "--new-probability", type=float, default=0.8, help="Chance of a new idea vs. a revisit."
     )
     frontier.add_argument(
-        "--starts", type=int, default=4, help="Cold starts per fit: the model's own start plus seeded jitter."
+        "--starts",
+        type=int,
+        default=5,
+        help="Starts per fit: the model's own, seeded jitters, and a warm start from the parent.",
     )
     frontier.add_argument("--finalize", action="store_true", help="Use selection and locked-test cells once.")
     frontier.set_defaults(func=lambda args: _load("frontier.runner", "run")(args))
+
+    fitbench = commands.add_parser(
+        "fitbench",
+        parents=[upstream],
+        help="Benchmark fitters on frontier equations that contain one another.",
+    )
+    fitbench.add_argument("--dataset", type=Path, default=Path("data/gratings_drifting_GT1_2019_04_12_1.npy"))
+    fitbench.add_argument("--cells", type=int, default=64, help="Exploration cells in the benchmark cohort.")
+    fitbench.add_argument(
+        "--fitters",
+        default="protocol,warm",
+        help="Comma-separated fitters to run (protocol, warm, single, reference); empty only reports.",
+    )
+    fitbench.add_argument("--output", type=Path, default=Path("results/fitbench"))
+    fitbench.set_defaults(func=lambda args: _load("frontier.bench", "run")(args))
 
     viewer = commands.add_parser("frontier-view", help="Serve a live frontier graph and batch replay.")
     viewer.add_argument("--run", type=Path, required=True, help="Run directory or wave.json.")
