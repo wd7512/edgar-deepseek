@@ -107,6 +107,30 @@ def protocol_fitter(starts=STARTS, max_iter=fitting.LM_ITERATIONS, relative_step
     return fit
 
 
+def group_means(xt, yt, size):
+    """Sort each cell's trials by angle and average every `size` neighbours into one point.
+
+    Each point stands for the same number of trials, so a least-squares fit to the points weighs the
+    trials almost as a fit to the trials themselves does; a trailing remainder is dropped.
+    """
+    xt, yt = np.asarray(xt), np.asarray(yt)
+    order = np.argsort(xt, axis=1)
+    usable = xt.shape[1] // size * size
+    x = np.take_along_axis(xt, order, axis=1)[:, :usable].reshape(len(xt), -1, size)
+    y = np.take_along_axis(yt, order, axis=1)[:, :usable].reshape(len(yt), -1, size)
+    return x.mean(axis=2), y.mean(axis=2)
+
+
+def binned_fitter(size, **options):
+    """`protocol` fitted to neighbour-averaged training points instead of the trials."""
+    full = protocol_fitter(**options)
+
+    def fit(equation, xt, yt, warm):
+        return full(equation, *group_means(xt, yt, size), warm)
+
+    return fit
+
+
 FITTERS = {
     "protocol": Fitter(protocol_fitter()),
     "warm": Fitter(protocol_fitter(), warm=True),
@@ -118,6 +142,8 @@ FITTERS = {
     },
     "absolute": Fitter(protocol_fitter(relative_step=False)),
     "absolute-warm": Fitter(protocol_fitter(relative_step=False), warm=True),
+    **{f"binned-{n}": Fitter(binned_fitter(n, guard=False)) for n in (2, 4, 8)},
+    **{f"binned-{n}-warm": Fitter(binned_fitter(n, guard=False), warm=True) for n in (2, 4, 8)},
     "reference": Fitter(protocol_fitter(starts=32, max_iter=400, relative_step=True), warm=True),
 }
 
