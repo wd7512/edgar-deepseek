@@ -353,3 +353,23 @@ def test_the_protocols_relative_step_cap_reaches_a_far_start_that_an_absolute_ca
         return float(np.mean((np.asarray(predict(far.model, x, params)) - y) ** 2))
 
     assert error(relative) < error(capped)
+
+
+def test_a_start_that_spikes_between_training_angles_is_never_chosen_for_its_lower_training_error():
+    theta, y = double_gaussian_cohort(cells=4, trials=72)
+    train, _ = split_trials(theta)
+    spiky = equation(
+        "b + a1*exp(-0.5*(wrap(theta-m)/s)**2) + a2*exp(-0.5*(wrap(theta-m-pi)/s)**2) "
+        "+ h*exp(-0.5*(wrap(theta-c)/0.0005)**2)",
+        {**DOUBLE_GAUSSIAN_START, "h": 0.0, "c": 0.0},
+    )
+    good = fit_equation(equation(), (theta, y), 100, starts=1).params
+    gaps = np.sort(np.asarray(theta)[0, np.asarray(train)])
+    middle = float(gaps[np.argmax(np.diff(gaps))] + np.max(np.diff(gaps)) / 2)
+    names = list(spiky.initial)
+    reference = dict(zip(equation().initial, good.T, strict=True))
+    needle = np.stack([reference.get(n, np.full(4, {"h": 1e6, "c": middle}.get(n, 0.0))) for n in names], 1)
+    params = fit_equation_training(
+        spiky, np.asarray(theta)[:, train], np.asarray(y)[:, train], 0, warm=needle, starts=2
+    )
+    assert np.all(params[:, names.index("h")] < 1e3)

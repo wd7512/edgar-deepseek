@@ -98,7 +98,7 @@ async def execute(
     wave: dict[str, Any] = {
         "version": 4,
         "seed": seed,
-        "fit_protocol": "warm_multistart_v2",
+        "fit_protocol": "warm_multistart_v3",
         "idea_source": "generated" if discovery else "catalog",
         "idea_catalog": [asdict(i) for i in ideas],
         "graph": [baseline_node()],

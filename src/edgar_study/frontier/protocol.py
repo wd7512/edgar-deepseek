@@ -22,6 +22,7 @@ STARTS = 5
 JITTER = fitting.MULTISTART_SCALE
 RELATIVE_STEP = True
 PRUNE_AFTER = None
+GUARD = True
 
 
 class Fit(NamedTuple):
@@ -75,6 +76,7 @@ def fit_training(
     warm=None,
     relative_step=RELATIVE_STEP,
     prune_after=PRUNE_AFTER,
+    guard=GUARD,
 ):
     """Fit `model` to training trials only and return each cell's parameters.
 
@@ -93,12 +95,20 @@ def fit_training(
         if warm.shape != start.shape:
             raise ValueError(f"Warm start has shape {warm.shape}, expected {start.shape}.")
         candidates[-1] = warm
+    band = fitting.response_band(yt) if guard else None
     if prune_after is not None:
         return fitting.fit_pruned(
-            model, candidates, xt, yt, prune_after, max_iterations=max_iter, relative_step=relative_step
+            model,
+            candidates,
+            xt,
+            yt,
+            prune_after,
+            max_iterations=max_iter,
+            relative_step=relative_step,
+            band=band,
         ).params
     return fitting.fit_from_starts(
-        model, candidates, xt, yt, max_iterations=max_iter, relative_step=relative_step
+        model, candidates, xt, yt, max_iterations=max_iter, relative_step=relative_step, band=band
     ).params
 
 

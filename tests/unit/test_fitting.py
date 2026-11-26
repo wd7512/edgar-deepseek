@@ -250,3 +250,52 @@ def test_dropping_finished_fits_between_chunks_changes_no_fit(chunk):
 
     np.testing.assert_allclose(chunked.params, whole.params, rtol=1e-5, atol=1e-6)
     assert (chunked.iterations, chunked.stopped) == (whole.iterations, whole.stopped)
+
+
+def _needle(theta, a, h):
+    import jax.numpy as jnp
+
+    return a + h * jnp.exp(-0.5 * ((jnp.mod(theta - 1.0 + jnp.pi, 2 * jnp.pi) - jnp.pi) / 0.001) ** 2)
+
+
+def _needle_cells(heights=(1e6, 0.0)):
+    theta = np.tile(np.mod(np.linspace(1.1, 1.1 + 2 * np.pi - 0.2, 60), 2 * np.pi).astype(np.float32), (3, 1))
+    y = (2.0 + 0.1 * np.sin(5 * theta)).astype(np.float32)
+    level = y.mean(axis=1)
+    starts = [np.stack([level + 0.1 * i, np.full(3, h)], axis=1) for i, h in enumerate(heights)]
+    return theta, y, np.stack(starts).astype(np.float32)
+
+
+def test_a_spike_between_training_angles_is_invisible_to_the_training_error():
+    theta, y, candidates = _needle_cells()
+    fit = fitting.fit_from_starts(_needle, candidates, theta, y, max_iterations=0)
+    assert np.all(fit.best_start == 0)
+
+
+def test_a_start_whose_curve_leaves_the_response_band_is_not_chosen():
+    theta, y, candidates = _needle_cells()
+    band = fitting.response_band(y)
+    fit = fitting.fit_from_starts(_needle, candidates, theta, y, max_iterations=0, band=band)
+    assert np.all(fit.best_start == 1)
+    np.testing.assert_allclose(fit.params, candidates[1])
+
+
+def test_when_every_start_leaves_the_band_the_lowest_training_error_is_kept():
+    theta, y, candidates = _needle_cells(heights=(1e6, 1e6))
+    fit = fitting.fit_from_starts(
+        _needle, candidates, theta, y, max_iterations=0, band=fitting.response_band(y)
+    )
+    assert np.all(fit.best_start == 0)
+
+
+def test_the_response_band_widens_each_cells_range_by_that_range_and_never_collapses():
+    y = np.array([[0.0, 2.0, 1.0], [3.0, 3.0, 3.0]], dtype=np.float32)
+    np.testing.assert_allclose(fitting.response_band(y), [[-2.0, 4.0], [2.0, 4.0]])
+
+
+def test_curves_are_checked_on_a_grid_fine_enough_to_find_a_needle_a_tenth_of_a_degree_wide():
+    theta, y, candidates = _needle_cells()
+    inside = fitting.within_band(
+        _needle, candidates.reshape(-1, 2), np.tile(fitting.response_band(y), (2, 1))
+    )
+    assert inside.tolist() == [False] * 3 + [True] * 3

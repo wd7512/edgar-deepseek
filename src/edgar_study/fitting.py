@@ -42,6 +42,8 @@ LM_BOUNDED_TOLERANCE = 1e-4
 MAX_DAMPING = 1e7
 MULTISTART_STARTS = 8
 MULTISTART_SCALE = 0.5
+GUARD_POINTS = 7200
+GUARD_ROWS = 512
 
 log = logging.getLogger(__name__)
 
@@ -401,6 +403,37 @@ def fit_multistart(
     )
 
 
+def response_band(y):
+    """Each cell's plausible fitted range: its responses widened by their range (at least 1) on each side."""
+    y = np.asarray(y)
+    low, high = y.min(axis=1), y.max(axis=1)
+    spread = np.maximum(high - low, 1.0)
+    return np.stack([low - spread, high + spread], axis=1).astype(np.float32)
+
+
+def within_band(model, params, band, points=GUARD_POINTS):
+    """Whether each row's curve stays finite and inside its band on a grid of `points` angles."""
+    grid = jnp.linspace(0.0, 2 * jnp.pi, points, endpoint=False)
+
+    @jax.jit
+    def extremes(rows):
+        def one(p):
+            curve = jnp.broadcast_to(model(grid, *p), grid.shape)
+            return jnp.min(curve), jnp.max(curve)
+
+        return jax.vmap(one)(rows)
+
+    params, band = np.asarray(params), np.asarray(band)
+    size = min(GUARD_ROWS, len(params))
+    low, high = np.empty(len(params)), np.empty(len(params))
+    for begin in range(0, len(params), size):
+        rows = params[begin : begin + size]
+        padded = np.concatenate([rows, np.repeat(rows[:1], size - len(rows), axis=0)])
+        lo, hi = jax.device_get(extremes(jnp.asarray(padded)))
+        low[begin : begin + len(rows)], high[begin : begin + len(rows)] = lo[: len(rows)], hi[: len(rows)]
+    return np.isfinite(low) & np.isfinite(high) & (low >= band[:, 0]) & (high <= band[:, 1])
+
+
 def fit_from_starts(
     model,
     candidates,
@@ -409,9 +442,13 @@ def fit_from_starts(
     max_iterations=LM_ITERATIONS,
     tolerance=LM_BOUNDED_TOLERANCE,
     relative_step=False,
+    band=None,
 ):
     """Fit from every start in `candidates` (starts, cells, parameters) and keep each cell's lowest-error
-    fit; ties go to the earliest start."""
+    fit; ties go to the earliest start.
+
+    With a `band` (cells, 2), a fit whose curve leaves its cell's band anywhere on a fine angle grid is
+    chosen only if every start for that cell does, so a spike between training angles cannot win."""
     candidates = np.asarray(candidates)
     k, cells, n = candidates.shape
     x_all, y_all = np.tile(np.asarray(x), (k, 1)), np.tile(np.asarray(y), (k, 1))
@@ -433,6 +470,10 @@ def fit_from_starts(
     cost, _ = _least_squares(model, jnp.asarray(x_all), jnp.asarray(y_all))
     costs = np.asarray(cost(jnp.asarray(fit.params))).reshape(k, cells)
     costs = np.where(np.isfinite(costs), costs, np.inf)
+    if band is not None:
+        inside = within_band(model, fit.params, np.tile(np.asarray(band), (k, 1))).reshape(k, cells)
+        guarded = np.where(inside, costs, np.inf)
+        costs = np.where(inside.any(axis=0), guarded, costs)
     best = np.argmin(costs, axis=0)
     cell = np.arange(cells)
     return MultiStartFit(fit.params.reshape(k, cells, n)[best, cell], best, costs[best, cell])
@@ -447,6 +488,7 @@ def fit_pruned(
     max_iterations=LM_ITERATIONS,
     tolerance=LM_BOUNDED_TOLERANCE,
     relative_step=False,
+    band=None,
 ):
     """Fit every start for `prune_after` iterations, then continue only each cell's leading start.
 
@@ -455,7 +497,7 @@ def fit_pruned(
     """
     options = {"tolerance": tolerance, "relative_step": relative_step}
     early = fit_from_starts(
-        model, candidates, x, y, max_iterations=min(prune_after, max_iterations), **options
+        model, candidates, x, y, max_iterations=min(prune_after, max_iterations), band=band, **options
     )
     if prune_after >= max_iterations or len(candidates) == 1:
         return early
