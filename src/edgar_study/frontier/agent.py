@@ -98,7 +98,10 @@ def check_proposal(proposal, *, texts: Iterable[str] = (), keys: Iterable[str] =
     for parent in parents:
         nesting = complete_map(equation, parent)
         if nesting is None:
-            notes.append(f"No map from {parent.node_id}'s parameters reproduces {parent.node_id} exactly.")
+            notes.append(
+                f"It does not contain {parent.node_id} as a special case: no setting of its parameters "
+                f"reproduces {parent.node_id}."
+            )
         elif nesting.declared:
             notes.append(f"Your nesting map for {parent.node_id} reproduces it.")
         else:

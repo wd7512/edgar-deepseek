@@ -220,3 +220,12 @@ def test_the_report_lists_each_equation_in_order():
 )
 def test_well_formed_equations_pass_the_check(proposal):
     assert check_proposal(proposal)["problems"] == []
+
+
+def test_a_child_that_does_not_contain_its_parent_is_told_so_plainly():
+    laplace = {
+        "equation": "b + a1*exp(-abs(wrap(theta-m))/s) + a2*exp(-abs(wrap(theta-m-pi))/s)",
+        "initial": START,
+    }
+    (note,) = check_proposal(laplace, parents=[gauss_parent()])["notes"]
+    assert note.startswith("It does not contain double_gaussian as a special case")

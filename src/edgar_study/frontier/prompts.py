@@ -15,7 +15,7 @@ def generated_prompt(choice, nodes, references, k, tried=()):
         idea = nodes[selected]
         task = (
             f"Revisit {idea.label}: {idea.text}. Keep the same idea and give new implementations. "
-            f"Return only a JSON array with zero to {k} equation objects."
+            f"Return only a JSON array with up to {k} equation objects; each distinct equation is another try."
         )
         if tried:
             task += f" Already tried for this idea (do not repeat): {json.dumps(list(tried))}."
@@ -38,7 +38,8 @@ def generated_prompt(choice, nodes, references, k, tried=()):
             "The idea has a short, concise 'title' you choose and a concrete 'change'. "
             "The optional 'mechanism' names the changed component, for example offset, width, amplitude, "
             "centre, baseline, shape, kernel, or mixture; it defaults to the title. "
-            f"Provide zero to {k} structurally distinct equations in 'equations'."
+            f"Provide up to {k} structurally distinct equations in 'equations'; each distinct equation is"
+            " another try at the idea."
         )
     parents = [
         f"{name}: {BASE}"
