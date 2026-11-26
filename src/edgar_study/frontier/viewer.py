@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 from contextlib import suppress
 from hashlib import sha256
 from html import escape
+from math import ceil
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from textwrap import wrap
 from urllib.parse import parse_qs, urlsplit
@@ -19,6 +20,8 @@ MODES = {
     "anomaly_detour": "Anomaly detour",
     "independent_root": "Independent root",
 }
+
+NODE_W, NODE_H, GAP, WIDTH = 192, 68, 10, 1000
 
 LAYOUT = {
     "width": (145, 145),
@@ -43,10 +46,14 @@ a.active{color:#80e8cd;font-weight:700}.graph-shell{position:relative;border-blo
 .graph{display:block;width:100%;height:min(var(--graph-h),max(125px,calc(100dvh - 155px)))}
 .node{cursor:grab;touch-action:none;outline:none}.node:active{cursor:grabbing}
 .node rect{fill:#222f40;stroke:#899aae;stroke-width:1.5}
+.node.lowest rect{fill:#1f3a3c;stroke:#6fcfb8;stroke-opacity:.75;filter:drop-shadow(0 0 5px #59d8c666)}
 .node.current rect,.node:focus-visible rect{stroke:#b7ecff;stroke-width:2.5}
 .node text{fill:#edf4fc;font-size:12px;font-weight:650;text-anchor:middle;pointer-events:none;user-select:none}
 .node .sub{fill:#bfd0e1;font-size:10px;font-weight:400}.route path{fill:none;stroke:#657686;stroke-width:1.5}
 .route circle{fill:#263647;stroke:#657686}.route text{fill:#e0e8f2;font-size:9px;text-anchor:middle}
+.graph{touch-action:none;cursor:grab}.graph.panning{cursor:grabbing}.zoom{display:inline-flex;gap:4px}
+.zoom button{min-width:28px}.legend::before{content:"";display:inline-block;width:10px;height:10px;margin-right:5px;
+border:1px solid #6fcfb8;background:#1f3a3c;border-radius:2px;vertical-align:-1px}
 button{font:inherit;color:#b7ecff;background:#182331;border:1px solid #41546a;border-radius:4px;cursor:pointer}
 .inspector{position:absolute;right:0;top:0;width:min(360px,100%);max-height:100%;overflow:auto;z-index:1;
 background:#182331;border:1px solid #41546a;border-radius:4px;padding:12px;overflow-wrap:anywhere}
@@ -58,10 +65,32 @@ SCRIPT = """
 const $ = (q, el = document) => el.querySelector(q);
 const $$ = (q, el = document) => Array.from(el.querySelectorAll(q));
 const storageKey = 'frontier-layout:' + $('main').dataset.layout;
-let positions = new Map(), dragging, selected;
+let positions = new Map(), dragging, panning, selected, view = {k: 1, x: 0, y: 0};
+const NODE_W = 192, NODE_H = 68, GAP = 6, MIN_K = 0.3, MAX_K = 4;
 try { positions = new Map(JSON.parse(localStorage.getItem(storageKey) || '[]')); } catch {}
 function save() {
   try { localStorage.setItem(storageKey, JSON.stringify([...positions])); } catch {}
+}
+function applyView() {
+  for (const g of $$('.viewport')) g.setAttribute('transform', `translate(${view.x},${view.y}) scale(${view.k})`);
+}
+function zoomAt(factor, cx, cy) {
+  const k = Math.max(MIN_K, Math.min(MAX_K, view.k * factor)), r = k / view.k;
+  view = {k, x: cx - (cx - view.x) * r, y: cy - (cy - view.y) * r};
+  applyView();
+}
+function canvasPoint(event, svg) {
+  return new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());
+}
+function overlaps(node, x, y) {
+  return $$('.node').some(other => other !== node &&
+    Math.abs(x - +other.dataset.x) < NODE_W + GAP && Math.abs(y - +other.dataset.y) < NODE_H + GAP);
+}
+function clear(node, x, y, from) {
+  if (!overlaps(node, x, y)) return [x, y];
+  if (!overlaps(node, x, from[1])) return [x, from[1]];
+  if (!overlaps(node, from[0], y)) return [from[0], y];
+  return from;
 }
 function setPosition(node, x, y) {
   node.setAttribute('transform', `translate(${x},${y})`);
@@ -97,10 +126,14 @@ function drawArrows() {
   }
 }
 function applyLayout() {
-  for (const node of $$('.node')) {
-    setPosition(node, ...(positions.get(node.dataset.node) || [+node.dataset.homeX, +node.dataset.homeY]));
+  const nodes = $$('.node');
+  for (const node of nodes) setPosition(node, +node.dataset.homeX, +node.dataset.homeY);
+  for (const node of nodes) {
+    const saved = positions.get(node.dataset.node);
+    if (saved && !overlaps(node, ...saved)) setPosition(node, ...saved);
   }
   drawArrows();
+  applyView();
 }
 function inspect(id, expanded = new Set()) {
   const detail = $$('.inspector').find(el => el.dataset.ideaDetail === id);
@@ -109,28 +142,56 @@ function inspect(id, expanded = new Set()) {
   if (detail) for (const item of $$('details', detail)) item.open ||= expanded.has(item.dataset.equationId);
 }
 function point(event, svg) {
-  return new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());
+  return new DOMPoint(event.clientX, event.clientY).matrixTransform($('.viewport', svg).getScreenCTM().inverse());
 }
+document.addEventListener('wheel', event => {
+  const svg = event.target.closest('.graph');
+  if (!svg) return;
+  event.preventDefault();
+  const p = canvasPoint(event, svg);
+  zoomAt(Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.0015)), p.x, p.y);
+}, {passive: false});
 document.addEventListener('pointerdown', event => {
   const node = event.target.closest('.node');
-  if (!node || !event.isPrimary || event.button !== 0) return;
+  if (!event.isPrimary || event.button !== 0) return;
+  const canvas = event.target.closest('.graph');
+  if (!node && canvas) {
+    panning = {svg: canvas, start: canvasPoint(event, canvas), x: view.x, y: view.y, id: event.pointerId};
+    canvas.setPointerCapture(event.pointerId);
+    canvas.classList.add('panning');
+    return;
+  }
+  if (!node) return;
   const svg = node.ownerSVGElement;
   const start = point(event, svg);
   dragging = {node, svg, start, x: +node.dataset.x, y: +node.dataset.y, id: event.pointerId, moved: false};
   node.setPointerCapture(event.pointerId);
 });
 document.addEventListener('pointermove', event => {
+  if (panning?.id === event.pointerId) {
+    const p = canvasPoint(event, panning.svg);
+    view.x = panning.x + p.x - panning.start.x;
+    view.y = panning.y + p.y - panning.start.y;
+    applyView();
+    return;
+  }
   if (dragging?.id !== event.pointerId) return;
   const {node, svg, start, x, y} = dragging;
   const p = point(event, svg), dx = p.x - start.x, dy = p.y - start.y;
   if (!dragging.moved && Math.hypot(dx, dy) < 4) return;
   dragging.moved = true;
   const rect = svg.viewBox.baseVal;
-  setPosition(node, Math.max(96, Math.min(rect.width - 96, x + dx)),
-    Math.max(34, Math.min(rect.height - 34, y + dy)));
+  const wanted = [Math.max(NODE_W / 2, Math.min(rect.width - NODE_W / 2, x + dx)),
+    Math.max(NODE_H / 2, Math.min(rect.height - NODE_H / 2, y + dy))];
+  setPosition(node, ...clear(node, ...wanted, [+node.dataset.x, +node.dataset.y]));
   drawArrows();
 });
 function finishDrag(event) {
+  if (panning?.id === event.pointerId) {
+    panning.svg.classList.remove('panning');
+    panning = undefined;
+    return;
+  }
   if (dragging?.id !== event.pointerId) return;
   const {node, moved} = dragging;
   dragging = undefined;
@@ -158,6 +219,14 @@ function closeInspector() {
   node?.focus();
 }
 document.addEventListener('click', event => {
+  const zoom = event.target.closest('[data-zoom]');
+  if (zoom) {
+    const box = $('.graph').viewBox.baseVal;
+    if (zoom.dataset.zoom === 'fit') {
+      view = {k: 1, x: 0, y: 0};
+      applyView();
+    } else zoomAt(zoom.dataset.zoom === 'in' ? 1.25 : 0.8, box.width / 2, box.height / 2);
+  }
   if (event.target.closest('[data-reset]')) {
     positions.clear();
     save();
@@ -195,22 +264,28 @@ setTimeout(refresh, 2000);
 """
 
 
+def _free(pos, placed):
+    return all(abs(pos[0] - x) >= NODE_W + GAP or abs(pos[1] - y) >= NODE_H + GAP for x, y in placed)
+
+
 def _layout(catalog):
-    height = max(460, 100 * ((len(catalog) + 3) // 4))
     positions = {node: LAYOUT[node] for node in catalog if node in LAYOUT}
+    step = NODE_W + GAP + 8
+    columns = (WIDTH - 16 - NODE_W) // step + 1
+    cell = 0
     for node in catalog:
         if node in positions:
             continue
-        candidates = (
-            (110 + (i * 233) % 781, 42 + (i * 137) % (height - 84)) for i in range(len(catalog) * 24 + 48)
-        )
-        positions[node] = max(
-            candidates,
-            key=lambda pos: min(
-                (max(abs(pos[0] - x) / 205, abs(pos[1] - y) / 78) for x, y in positions.values()),
-                default=0,
-            ),
-        )
+        while True:
+            pos = (
+                NODE_W // 2 + 8 + (cell % columns) * step,
+                NODE_H // 2 + 8 + (cell // columns) * (NODE_H + GAP),
+            )
+            cell += 1
+            if _free(pos, positions.values()):
+                positions[node] = pos
+                break
+    height = max(460, ceil(max(y for _, y in positions.values()) + NODE_H // 2 + 20))
     return positions, height
 
 
@@ -218,7 +293,7 @@ def _label(idea):
     return idea.get("label") or idea["text"]
 
 
-def _graph(nodes, catalog, counts, best, current):
+def _graph(nodes, catalog, counts, best, current, lowest):
     positions, height = _layout(catalog)
     edges, cards = [], []
     for node, idea in nodes.items():
@@ -249,22 +324,27 @@ def _graph(nodes, catalog, counts, best, current):
         count = counts[node]
         summary = f"{count} equation{'s' if count != 1 else ''}"
         metrics = _metrics_line(best.get(node))
+        wins = sorted(lowest.get(node, ()))
+        note = " Lowest MSE for " + ", ".join(f"{n} parameters" for n in wins) + "." if wins else ""
+        mark = f' data-lowest-mse="{",".join(map(str, wins))}"' if wins else ""
         cards.append(
-            f'<g class="node{" current" if node == current else ""}" data-node="{escape(node)}" '
+            f'<g class="node{" current" if node == current else ""}{" lowest" if wins else ""}" '
+            f'data-node="{escape(node)}"{mark} '
             f'data-equations="{count}" data-home-x="{x}" data-home-y="{y}" '
             f'transform="translate({x},{y})" tabindex="0" role="button" '
-            f'aria-label="{escape(title)}: {summary}; {metrics}">'
-            f"<title>{escape(idea['text'])} {summary}. MSE is unpenalized and measured on held-out trials.</title>"
+            f'aria-label="{escape(title)}: {summary}; {metrics}.{note}">'
+            f"<title>{escape(idea['text'])} {summary}. MSE is unpenalized and measured on held-out trials.{note}</title>"
             '<rect width="192" height="68" x="-96" y="-34" rx="5"/>'
             f'{labels}<text class="sub" y="25">{metrics}</text></g>'
         )
     return (
         f'<svg class="graph" style="--graph-h:{height}px" viewBox="0 0 1000 {height}" '
-        'role="group" aria-label="Draggable prerequisite graph">'
+        'role="group" aria-label="Prerequisite graph; scroll to zoom, drag the background to pan">'
         '<defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" '
         'orient="auto"><path d="M0 0L8 4L0 8Z" style="fill:context-stroke"/></marker></defs>'
+        + '<g class="viewport">'
         + "".join(edges + cards)
-        + "</svg>"
+        + "</g></svg>"
     )
 
 
@@ -302,6 +382,26 @@ def _metrics_detail(metrics):
         train_text = f" · Training MSE: {train:.6g}" if train is not None else ""
         return f"<p>Held-out MSE: {metrics['mse']:.6g}{train_text} · Free parameters: {metrics['parameters']}</p>"
     return ""
+
+
+def _lowest_mse(episodes, nodes, baseline):
+    """Map each node to the parameter counts for which it holds the lowest held-out MSE."""
+    entries = []
+    if BASELINE_ID in nodes and baseline and "mse" in baseline and "parameters" in baseline:
+        entries.append((BASELINE_ID, baseline["parameters"], baseline["mse"]))
+    for event in episodes:
+        for candidate in event.get("candidates", []):
+            metrics = candidate.get("metrics")
+            if candidate.get("status") == "fitted" and metrics and "mse" in metrics and "parameters" in metrics:
+                entries.append((event["node"], metrics["parameters"], metrics["mse"]))
+    floor = {}
+    for _, count, mse in entries:
+        floor[count] = min(mse, floor.get(count, mse))
+    owners = defaultdict(set)
+    for node, count, mse in entries:
+        if mse == floor[count]:
+            owners[node].add(count)
+    return owners
 
 
 def _inspector(node, idea, probes, reference, baseline_metrics):
@@ -397,6 +497,7 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
                 and (node not in best or metrics["score"] < best[node]["score"])
             ):
                 best[node] = metrics
+    lowest = _lowest_mse(episodes, nodes, wave.get("baseline_exploration"))
     counts = Counter(
         event["node"]
         for event in episodes
@@ -422,7 +523,12 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
             f'<a class="{"active" if live else ""}" href="/">Live / latest</a>'
         )
     if nodes:
-        bar += '<button type="button" data-reset>Reset layout</button>'
+        bar += (
+            '<span class="zoom"><button type="button" data-zoom="out" aria-label="Zoom out">−</button>'
+            '<button type="button" data-zoom="fit" aria-label="Reset zoom">Fit</button>'
+            '<button type="button" data-zoom="in" aria-label="Zoom in">+</button></span>'
+            '<button type="button" data-reset>Reset layout</button>'
+        )
     if current in catalog or current:
         label = escape(_label(catalog[current]) if current in catalog else selected.get("label", "New idea"))
         lead = f"Running batch {active['batch']}" if active else "Latest probe"
@@ -438,10 +544,11 @@ def render(wave, step=None, *, fragment=False, snapshot="", layout=""):
             _inspector(node, idea, probes[node], shortlist.get(node), wave.get("baseline_exploration"))
             for node, idea in nodes.items()
         )
-        graph = _graph(nodes, catalog, counts, best, current)
+        graph = _graph(nodes, catalog, counts, best, current, lowest)
         content += (
             f'<section class="graph-shell">{graph}{inspectors}</section>'
-            "<small>Click a node for probes and equations · Drag to move · AND requires every parent fit</small>"
+            "<small>Click a node for probes and equations · Drag to move · Scroll to zoom, drag the background to pan · "
+            '<span class="legend">lowest MSE for its parameter count</span> · AND requires every parent fit</small>'
         )
     replay_note = wave.get("replay_note")
     note = f'<p role="note">{escape(replay_note)}</p>' if replay_note else ""

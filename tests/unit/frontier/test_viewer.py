@@ -189,3 +189,77 @@ def test_growing_replay_shows_ideas_and_all_their_probes_only_when_available():
     assert "Batch 2" in latest and "Batch 3" in latest
     assert "cos(2*theta)" in latest
     assert 'marker-end="url(#arrow)"' in latest
+
+
+def _homes(view):
+    import re
+
+    return {
+        node: (float(x), float(y))
+        for node, x, y in re.findall(r'data-node="([^"]+)"[^>]*data-home-x="([^"]+)" data-home-y="([^"]+)"', view)
+    }
+
+
+def _fitted(equation, mse, parameters):
+    return {
+        "equation": equation,
+        "status": "fitted",
+        "metrics": {"score": mse, "mse": mse, "parameters": parameters},
+    }
+
+
+def test_initial_layout_never_overlaps_however_many_ideas_there_are():
+    names = [f"idea-{i}" for i in range(60)] + ["width", "drift", "double_gaussian"]
+    wave = {"graph": [{"node": n, "text": n, "routes": [], "introduced_at": 0} for n in names]}
+    homes = _homes(render(wave))
+    assert len(homes) == len(names)
+    points = list(homes.values())
+    for i, (x, y) in enumerate(points):
+        for ox, oy in points[i + 1 :]:
+            assert abs(x - ox) >= 192 or abs(y - oy) >= 68
+        assert 96 <= x <= 904 and y >= 34
+
+
+def test_graph_can_be_zoomed_and_reset():
+    view = render({"graph": [{"node": "a", "text": "A", "routes": []}]})
+    assert '<g class="viewport"' in view
+    for action in ("in", "out", "fit"):
+        assert f'data-zoom="{action}"' in view
+    assert 'data-node="a"' in view.split('<g class="viewport"')[1]
+
+
+def test_lowest_mse_for_each_parameter_count_is_highlighted_gently():
+    wave = {
+        "graph": [{"node": n, "text": n, "routes": [], "introduced_at": 0} for n in "abcd"],
+        "episodes": [
+            {"node": "a", "candidates": [_fitted("x", 0.5, 3), _fitted("y", 0.1, 4)]},
+            {"node": "b", "candidates": [_fitted("x", 0.2, 3)]},
+            {"node": "c", "candidates": [_fitted("x", 0.9, 5)]},
+            {"node": "d", "candidates": [_fitted("x", 0.9, 4), {"status": "fit_failed", "equation": "z"}]},
+        ],
+    }
+    view = render(wave)
+
+    def tag(node):
+        return view.split(f'data-node="{node}"')[1].split(">")[0]
+
+    assert 'data-lowest-mse="4"' in tag("a")
+    assert 'data-lowest-mse="3"' in tag("b")
+    assert 'data-lowest-mse="5"' in tag("c")
+    assert "data-lowest-mse" not in tag("d")
+    assert "Lowest MSE for 3 parameters" in view
+    assert 'data-lowest-mse="3"' not in tag("a")
+
+
+def test_highlight_follows_replay_and_ignores_ties_with_nothing():
+    wave = {
+        "graph": [{"node": n, "text": n, "routes": [], "introduced_at": 0} for n in "ab"],
+        "episodes": [
+            {"node": "a", "candidates": [_fitted("x", 0.5, 3)]},
+            {"node": "b", "candidates": [_fitted("x", 0.2, 3)]},
+        ],
+    }
+    first, both = render(wave, 1), render(wave)
+    assert 'data-lowest-mse="3"' in first.split('data-node="a"')[1].split(">")[0]
+    assert 'data-lowest-mse="3"' not in both.split('data-node="a"')[1].split(">")[0]
+    assert 'data-lowest-mse="3"' in both.split('data-node="b"')[1].split(">")[0]

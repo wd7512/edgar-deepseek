@@ -1,0 +1,1 @@
+The frontier viewer now keeps nodes from overlapping (grid fallback layout, drags and saved positions that would collide are blocked), supports wheel/button zoom and background pan, and softly highlights the node holding the lowest held-out MSE for each parameter count.
