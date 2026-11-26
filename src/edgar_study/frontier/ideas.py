@@ -1,7 +1,8 @@
 """Ideas, the prerequisite graph and route draws.
 
-Draws are score-blind by default. With a `Guide`, the scheduler (never the model) weights parents and
-revisits by their exploration scores, so the search climbs while every eligible parent stays possible.
+Draws are score-blind by default. With a `Guide`, the scheduler (never the model) weights every choice of
+a node (revisits, parents, catalog ideas and the routes made of parents) by exploration score, so the
+search climbs while every eligible node stays possible. All such choices go through `pick_nodes`.
 """
 
 import math
@@ -23,18 +24,40 @@ UNFITTED = 0.05
 
 @dataclass(frozen=True)
 class Guide:
-    """Exploration scores (lower is better) and a temperature in score units for weighting draws."""
+    """Exploration scores (lower is better) and how strongly to favour low ones, as exactly one of:
+
+    `temperature` (in score units): weight exp(-(score - lowest) / temperature).
+    `rank_bias`: weight 1 / (1 + rank_bias * rank / worst_rank), by rank alone, so the best name has
+    weight 1 and the worst 1 / (1 + rank_bias) however the scores are spread.
+    """
 
     scores: dict
-    temperature: float
+    temperature: float | None = None
+    rank_bias: float | None = None
+
+    def __post_init__(self):
+        if (self.temperature is None) == (self.rank_bias is None):
+            raise ValueError("Give a guide either a temperature or a rank bias.")
+        if self.rank_bias is not None and self.rank_bias < 0:
+            raise ValueError("Rank bias must be zero or more.")
 
     def weights(self, names):
-        """exp(-(score - lowest) / temperature) per name; names without a score get a small weight."""
-        known = [self.scores[n] for n in names if n in self.scores]
-        lowest = min(known) if known else 0.0
+        """A weight per name; names without a score get a small weight."""
+        known = {n: self.scores[n] for n in names if n in self.scores}
+        if self.rank_bias is not None:
+            rank = {n: sum(other < score for other in known.values()) for n, score in known.items()}
+            worst = max(rank.values(), default=0)
+            return {
+                n: 1 / (1 + self.rank_bias * rank[n] / worst)
+                if n in known and worst
+                else 1.0
+                if n in known
+                else UNFITTED
+                for n in names
+            }
+        lowest = min(known.values(), default=0.0)
         return {
-            n: math.exp(-(self.scores[n] - lowest) / self.temperature) if n in self.scores else UNFITTED
-            for n in names
+            n: math.exp(-(known[n] - lowest) / self.temperature) if n in known else UNFITTED for n in names
         }
 
 
@@ -88,8 +111,40 @@ def _pick(weighted, rng):
     return keys[int(rng.choice(len(keys), p=list(probabilities.values())))], probabilities
 
 
-def draw(ideas, references, attempts, rng, depth=None):
-    """Sample an eligible lane, branch, idea and complete route without seeing fit scores."""
+def pick_nodes(pool, count, rng, guide=None, uniform=False, base=None):
+    """Draw `count` distinct names from `pool`; return them and each name's first-draw probability.
+
+    A name's weight is its `base` weight (default 1) times the guide's weight. With no guide, or with
+    `uniform`, the guide is ignored: `uniform` is how a caller asks for a totally random pick.
+    """
+    pool = list(pool)
+    use = guide is not None and not uniform
+    if not use and base is None:
+        picks = rng.choice(len(pool), count, replace=False)
+        return [pool[int(i)] for i in picks], {name: 1 / len(pool) for name in pool}
+    fit = guide.weights(pool) if use else {}
+    weights = np.array([(base or {}).get(name, 1.0) * fit.get(name, 1.0) for name in pool], dtype=float)
+    probabilities = weights / weights.sum()
+    if count == 1:
+        picks = [int(rng.choice(len(pool), p=probabilities))]
+    else:
+        picks = [int(i) for i in rng.choice(len(pool), count, replace=False, p=probabilities)]
+    return [pool[i] for i in picks], dict(zip(pool, map(float, probabilities), strict=True))
+
+
+def pick_route(routes, rng, guide=None):
+    """Draw one route, uniformly or, with a guide, by the mean weight of the parents on it."""
+    if guide is None:
+        return routes[int(rng.integers(len(routes)))], 1 / len(routes)
+    fit = guide.weights({parent for route in routes for parent in route})
+    weights = np.array([np.mean([fit[parent] for parent in route] or [1.0]) for route in routes])
+    probabilities = weights / weights.sum()
+    index = int(rng.choice(len(routes), p=probabilities))
+    return routes[index], float(probabilities[index])
+
+
+def draw(ideas, references, attempts, rng, depth=None, guide=None):
+    """Sample an eligible lane, branch, idea and complete route; a guide weights ideas and routes by score."""
     depth = depth or {}
     eligible = {}
     for idea in ideas:
@@ -107,17 +162,14 @@ def draw(ideas, references, attempts, rng, depth=None):
         pool = [i for i in pool if not attempts.get(i.node)] or pool
     branch, branch_p = _pick({i.branch: 1 / (1 + depth.get(i.branch, 0)) for i in pool}, rng)
     tried = Counter(i.mechanism for i in ideas if attempts.get(i.node))
-    node, node_p = _pick(
-        {
-            i.node: 1
-            / ((1 + attempts.get(i.node, 0)) * (1 + tried[i.mechanism] - bool(attempts.get(i.node))))
-            for i in pool
-            if i.branch == branch
-        },
-        rng,
-    )
-    routes = eligible[node][1]
-    parents = routes[int(rng.integers(len(routes)))]
+    base = {
+        i.node: 1 / ((1 + attempts.get(i.node, 0)) * (1 + tried[i.mechanism] - bool(attempts.get(i.node))))
+        for i in pool
+        if i.branch == branch
+    }
+    picked, node_p = pick_nodes(list(base), 1, rng, guide, base=base)
+    node = picked[0]
+    parents, route_p = pick_route(eligible[node][1], rng, guide)
     return {
         "lane": lane,
         "branch": branch,
@@ -126,7 +178,7 @@ def draw(ideas, references, attempts, rng, depth=None):
         "lane_probabilities": lane_p,
         "branch_probabilities": branch_p,
         "node_probabilities": node_p,
-        "route_probability": 1 / len(routes),
+        "route_probability": route_p,
         "eligible": [
             {"node": i.node, "parents": list(route)} for i, routes in eligible.values() for route in routes
         ],
@@ -139,18 +191,18 @@ def draw_generated(nodes, references, history, rng, new_probability, step, guide
     kind, kind_p = _pick({key: value for key, value in types.items() if value}, rng)
     choice: dict[str, Any] = {"kind": kind, "kind_probabilities": kind_p}
     if kind == "revisit":
-        weights = {}
-        fit = guide.weights(list(nodes)) if guide else {}
+        validity = {}
         for node in nodes:
             recent = history.get(node, [])[-16:]
-            weights[node] = (1 - 0.85 * sum(recent) / max(1, len(recent))) * fit.get(node, 1.0)
-        node, node_p = _pick(weights, rng)
+            validity[node] = 1 - 0.85 * sum(recent) / max(1, len(recent))
+        picked, node_p = pick_nodes(list(nodes), 1, rng, guide, base=validity)
+        node = picked[0]
         routes = [
             route
             for route in nodes[node].routes or ((),)
             if all(parent == BASELINE_ID or parent in references for parent in route)
         ]
-        parents = routes[int(rng.integers(len(routes)))]
+        parents, route_p = pick_route(routes, rng, guide)
         return {
             **choice,
             "node": node,
@@ -158,7 +210,7 @@ def draw_generated(nodes, references, history, rng, new_probability, step, guide
             "mode": "revisit",
             "lane": nodes[node].lane,
             "node_probabilities": node_p,
-            "route_probability": 1 / len(routes),
+            "route_probability": route_p,
         }
     pool = [BASELINE_ID, *references]
     weights = dict(GUIDED_MODES if guide else BLIND_MODES)
@@ -170,14 +222,10 @@ def draw_generated(nodes, references, history, rng, new_probability, step, guide
     count = {"independent_root": 0, "combination": 2}.get(mode, 1)
     extra = {}
     if guide and count:
-        fit = guide.weights(pool)
-        total = sum(fit.values())
-        extra["parent_probabilities"] = {name: fit[name] / total for name in pool}
-        parents = sorted(
-            rng.choice(pool, count, replace=False, p=list(extra["parent_probabilities"].values())).tolist()
-        )
+        picked, extra["parent_probabilities"] = pick_nodes(pool, count, rng, guide)
     else:
-        parents = sorted(rng.choice(pool, count, replace=False).tolist())
+        picked, _ = pick_nodes(pool, count, rng)
+    parents = sorted(picked)
     return {
         **extra,
         **choice,

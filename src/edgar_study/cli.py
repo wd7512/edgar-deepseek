@@ -238,6 +238,13 @@ def main():
         default=None,
         help="Weight parents and revisits by exp(-(score - lowest) / T); the model never sees scores.",
     )
+    frontier.add_argument(
+        "--rank-bias",
+        type=float,
+        default=None,
+        help="Weight every node choice by 1 / (1 + B * rank / worst rank), best score first; the worst node is"
+        " 1 / (1 + B) as likely as the best. Not with --temperature.",
+    )
     frontier.add_argument("--finalize", action="store_true", help="Use selection and locked-test cells once.")
     frontier.set_defaults(func=lambda args: _load("frontier.runner", "run")(args))
 

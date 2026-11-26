@@ -3,7 +3,15 @@ from collections import Counter
 import numpy as np
 import pytest
 
-from edgar_study.frontier.ideas import Guide, Idea, draw, draw_generated, generated_idea, validate_graph
+from edgar_study.frontier.ideas import (
+    Guide,
+    Idea,
+    draw,
+    draw_generated,
+    generated_idea,
+    pick_nodes,
+    validate_graph,
+)
 from edgar_study.frontier.replies import InvalidReply
 
 
@@ -215,3 +223,92 @@ def test_guided_revisits_favour_better_fitting_ideas():
     )
     weights = choice["node_probabilities"]
     assert weights["good"] > 10 * weights["poor"] > 0
+
+
+SCORES = {"a": 28.0, "b": 28.4, "c": 29.0, "d": 29.0}
+
+
+def test_rank_weights_depend_only_on_rank_with_the_worst_at_one_over_one_plus_bias():
+    weights = Guide(SCORES, rank_bias=1.0).weights(["a", "b", "c", "d", "new"])
+    assert weights["a"] == 1.0
+    assert weights["a"] > weights["b"] > weights["c"]
+    assert weights["c"] == weights["d"] == pytest.approx(0.5)
+    assert weights["new"] == pytest.approx(0.05)
+    shifted = Guide({k: v * 10 + 3 for k, v in SCORES.items()}, rank_bias=1.0).weights(["a", "b", "c", "d"])
+    assert shifted == {k: weights[k] for k in "abcd"}
+
+
+def test_zero_rank_bias_and_a_single_scored_name_weigh_everything_equally():
+    assert set(Guide(SCORES, rank_bias=0.0).weights(["a", "b", "c"]).values()) == {1.0}
+    assert Guide(SCORES, rank_bias=3.0).weights(["a"]) == {"a": 1.0}
+
+
+def test_a_guide_needs_exactly_one_of_temperature_and_rank_bias():
+    with pytest.raises(ValueError):
+        Guide(SCORES)
+    with pytest.raises(ValueError):
+        Guide(SCORES, temperature=1.0, rank_bias=1.0)
+    with pytest.raises(ValueError):
+        Guide(SCORES, rank_bias=-0.1)
+
+
+def test_pick_nodes_returns_distinct_names_and_probabilities_that_sum_to_one():
+    guide = Guide(SCORES, rank_bias=1.0)
+    names, probabilities = pick_nodes(["a", "b", "c"], 2, np.random.default_rng(0), guide)
+    assert len(set(names)) == 2 and set(names) <= {"a", "b", "c"}
+    assert sum(probabilities.values()) == pytest.approx(1.0)
+
+
+def test_rank_bias_makes_the_best_node_about_twice_as_likely_as_the_worst_and_never_excludes_one():
+    guide = Guide({"a": 1.0, "b": 2.0, "c": 3.0}, rank_bias=1.0)
+    rng = np.random.default_rng(0)
+    counts = Counter(pick_nodes(["a", "b", "c"], 1, rng, guide)[0][0] for _ in range(6000))
+    assert counts["c"] > 0
+    assert 1.8 < counts["a"] / counts["c"] < 2.2
+
+
+def test_a_uniform_pick_ignores_the_guide():
+    guide = Guide({"a": 1.0, "b": 2.0}, rank_bias=50.0)
+    rng = np.random.default_rng(0)
+    counts = Counter(pick_nodes(["a", "b"], 1, rng, guide, uniform=True)[0][0] for _ in range(4000))
+    assert 0.9 < counts["a"] / counts["b"] < 1.1
+
+
+def test_a_base_weight_is_multiplied_by_the_rank_weight():
+    guide = Guide({"a": 1.0, "b": 2.0}, rank_bias=1.0)
+    _, probabilities = pick_nodes(["a", "b"], 1, np.random.default_rng(0), guide, base={"a": 1.0, "b": 2.0})
+    assert probabilities["a"] == pytest.approx(probabilities["b"])
+
+
+def test_a_rank_guide_biases_revisits_parents_and_routes_alike():
+    guide = Guide({"double_gaussian": 28.6, "good": 28.0, "poor": 29.5}, rank_bias=1.0)
+    nodes = _guided_nodes()
+    revisit = draw_generated(nodes, {"good": None, "poor": None}, {}, np.random.default_rng(0), 0, 5, guide)
+    assert revisit["node_probabilities"]["good"] == pytest.approx(2 * revisit["node_probabilities"]["poor"])
+    new = draw_generated(nodes, {"good": None, "poor": None}, {}, np.random.default_rng(1), 1, 5, guide)
+    while new["mode"] not in ("single_idea", "anomaly_detour"):
+        new = draw_generated(nodes, {"good": None, "poor": None}, {}, np.random.default_rng(2), 1, 5, guide)
+    assert new["parent_probabilities"]["good"] > new["parent_probabilities"]["poor"] > 0
+    routed = {
+        "x": Idea("x", "p", "m", "t", (("good",), ("poor",)), "frontier", "x"),
+        "good": nodes["good"],
+        "poor": nodes["poor"],
+    }
+    counts = Counter()
+    for seed in range(1500):
+        choice = draw_generated(
+            routed, {"good": None, "poor": None}, {}, np.random.default_rng(seed), 0, 5, guide
+        )
+        if choice["node"] == "x":
+            counts[tuple(choice["parents"])] += 1
+    assert counts[("good",)] > 1.5 * counts[("poor",)] > 0
+
+
+def test_a_rank_guide_biases_the_catalog_draw_among_ideas_of_one_branch():
+    ideas = (Idea("good", "peak", "m1", "t"), Idea("poor", "peak", "m2", "t"))
+    guide = Guide({"good": 1.0, "poor": 2.0}, rank_bias=3.0)
+    counts = Counter(
+        draw(ideas, {"good": None, "poor": None}, {}, np.random.default_rng(s), None, guide)["node"]
+        for s in range(3000)
+    )
+    assert counts["good"] > 2 * counts["poor"] > 0
