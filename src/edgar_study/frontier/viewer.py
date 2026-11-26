@@ -65,8 +65,10 @@ SCRIPT = """
 const $ = (q, el = document) => el.querySelector(q);
 const $$ = (q, el = document) => Array.from(el.querySelectorAll(q));
 const storageKey = 'frontier-layout:' + $('main').dataset.layout;
-let positions = new Map(), dragging, panning, selected, view = {k: 1, x: 0, y: 0};
-const NODE_W = 192, NODE_H = 68, GAP = 6, MIN_K = 0.3, MAX_K = 4;
+const NODE_W = 192, NODE_H = 68, PAD = 18, MIN_K = 0.25, MAX_K = 4, REST = 270, DROP = 150;
+const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let positions = new Map(), bodies = new Map(), links = [], dragging, panning, selected;
+let view = {k: 1, x: 0, y: 0}, alpha = 0, target = 0, frame = 0;
 try { positions = new Map(JSON.parse(localStorage.getItem(storageKey) || '[]')); } catch {}
 function save() {
   try { localStorage.setItem(storageKey, JSON.stringify([...positions])); } catch {}
@@ -79,18 +81,17 @@ function zoomAt(factor, cx, cy) {
   view = {k, x: cx - (cx - view.x) * r, y: cy - (cy - view.y) * r};
   applyView();
 }
+function fit() {
+  const box = $('.graph')?.viewBox.baseVal, list = [...bodies.values()];
+  if (!box || !list.length) return;
+  const x0 = Math.min(...list.map(b => b.x)) - NODE_W / 2, x1 = Math.max(...list.map(b => b.x)) + NODE_W / 2;
+  const y0 = Math.min(...list.map(b => b.y)) - NODE_H / 2, y1 = Math.max(...list.map(b => b.y)) + NODE_H / 2;
+  const k = Math.max(MIN_K, Math.min(1.5, 0.94 * Math.min(box.width / (x1 - x0), box.height / (y1 - y0))));
+  view = {k, x: box.width / 2 - k * (x0 + x1) / 2, y: box.height / 2 - k * (y0 + y1) / 2};
+  applyView();
+}
 function canvasPoint(event, svg) {
   return new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());
-}
-function overlaps(node, x, y) {
-  return $$('.node').some(other => other !== node &&
-    Math.abs(x - +other.dataset.x) < NODE_W + GAP && Math.abs(y - +other.dataset.y) < NODE_H + GAP);
-}
-function clear(node, x, y, from) {
-  if (!overlaps(node, x, y)) return [x, y];
-  if (!overlaps(node, x, from[1])) return [x, from[1]];
-  if (!overlaps(node, from[0], y)) return [from[0], y];
-  return from;
 }
 function setPosition(node, x, y) {
   node.setAttribute('transform', `translate(${x},${y})`);
@@ -125,15 +126,161 @@ function drawArrows() {
     $('[data-out]', route).setAttribute('d', `M${edge(joint, child, 12, 12)} L${edge(child, joint, 96, 34, 3)}`);
   }
 }
-function applyLayout() {
-  const nodes = $$('.node');
-  for (const node of nodes) setPosition(node, +node.dataset.homeX, +node.dataset.homeY);
-  for (const node of nodes) {
-    const saved = positions.get(node.dataset.node);
-    if (saved && !overlaps(node, ...saved)) setPosition(node, ...saved);
+function render() {
+  for (const b of bodies.values()) {
+    setPosition(b.el, Math.round(b.x * 10) / 10, Math.round(b.y * 10) / 10);
+    positions.set(b.id, [b.x, b.y]);
   }
   drawArrows();
+}
+function build(seeds) {
+  const previous = bodies;
+  bodies = new Map();
+  $$('.node').forEach((el, i) => {
+    const id = el.dataset.node, old = previous.get(id);
+    const [x, y] = old ? [old.x, old.y] : seeds.get(id) || [+el.dataset.homeX, +el.dataset.homeY];
+    bodies.set(id, {el, id, x: x + (i % 3) * 0.01, y: y + (i % 5) * 0.01, vx: 0, vy: 0, fixed: false, fresh: !seeds.has(id) && !old});
+  });
+  links = [];
+  for (const route of $$('.route')) {
+    for (const path of $$('path[data-parent]', route)) {
+      const pair = [path.dataset.parent, route.dataset.child];
+      if (pair.every(id => bodies.has(id))) links.push(pair.map(id => bodies.get(id)));
+    }
+  }
+}
+function tick(a) {
+  const list = [...bodies.values()], box = $('.graph').viewBox.baseVal;
+  const push = (b, fx, fy) => { if (!b.fixed) { b.vx += fx; b.vy += fy; } };
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      const p = list[i], q = list[j];
+      let dx = q.x - p.x, dy = q.y - p.y, d2 = dx * dx + dy * dy;
+      if (d2 < 1) { dx = 1; dy = 0.5; d2 = 1.25; }
+      const d = Math.sqrt(d2), f = Math.min(30, 45000 * a / d2);
+      push(p, -dx / d * f, -dy / d * f);
+      push(q, dx / d * f, dy / d * f);
+    }
+  }
+  for (const [p, c] of links) {
+    const dx = c.x - p.x, dy = c.y - p.y, d = Math.hypot(dx, dy) || 1, f = (d - REST) * 0.02 * a;
+    push(p, dx / d * f, dy / d * f);
+    push(c, -dx / d * f, -dy / d * f);
+    const short = DROP - dy;
+    if (short > 0) { push(c, 0, short * 0.04 * a); push(p, 0, -short * 0.04 * a); }
+  }
+  for (const [p, c] of links) {
+    const sx = c.x - p.x, sy = c.y - p.y, len2 = sx * sx + sy * sy || 1;
+    for (const m of list) {
+      if (m === p || m === c) continue;
+      const t = ((m.x - p.x) * sx + (m.y - p.y) * sy) / len2;
+      if (t < 0.02 || t > 0.98) continue;
+      const qx = p.x + sx * t, qy = p.y + sy * t, ox = m.x - qx, oy = m.y - qy;
+      const hit = Math.abs(ox) / (NODE_W / 2 + 22) , vit = Math.abs(oy) / (NODE_H / 2 + 22);
+      if (Math.max(hit, vit) >= 1) continue;
+      const d = Math.hypot(ox, oy) || 1, f = (1 - Math.max(hit, vit)) * 14 * a;
+      push(m, ox / d * f, oy / d * f);
+      push(p, -ox / d * f * 0.5, -oy / d * f * 0.5);
+      push(c, -ox / d * f * 0.5, -oy / d * f * 0.5);
+    }
+  }
+  for (const b of list) {
+    push(b, (box.width / 2 - b.x) * 0.006 * a, (box.height / 2 - b.y) * 0.006 * a);
+    if (b.fixed) { b.vx = b.vy = 0; continue; }
+    b.vx *= 0.62; b.vy *= 0.62;
+    b.x += b.vx; b.y += b.vy;
+  }
+  separate(list);
+}
+function separate(list) {
+  for (let pass = 0; pass < 4; pass++) {
+    let moved = false;
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const p = list[i], q = list[j];
+        const dx = q.x - p.x, dy = q.y - p.y;
+        const ox = NODE_W + PAD - Math.abs(dx), oy = NODE_H + PAD - Math.abs(dy);
+        if (ox <= 0 || oy <= 0) continue;
+        moved = true;
+        const share = p.fixed ? [0, 1] : q.fixed ? [1, 0] : [0.5, 0.5];
+        if (ox < oy) {
+          const s = dx < 0 ? -1 : 1;
+          p.x -= s * ox * share[0]; q.x += s * ox * share[1];
+        } else {
+          const s = dy < 0 ? -1 : 1;
+          p.y -= s * oy * share[0]; q.y += s * oy * share[1];
+        }
+      }
+    }
+    if (!moved) break;
+  }
+}
+function crossed([a, b], [c, d]) {
+  if (a === c || a === d || b === c || b === d) return false;
+  const turn = (p, q, r) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+  return turn(a, b, c) !== turn(a, b, d) && turn(c, d, a) !== turn(c, d, b);
+}
+function tangle() {
+  let n = 0, length = 0;
+  for (let i = 0; i < links.length; i++) {
+    length += Math.hypot(links[i][0].x - links[i][1].x, links[i][0].y - links[i][1].y);
+    for (let j = i + 1; j < links.length; j++) if (crossed(links[i], links[j])) n++;
+  }
+  return n * 600 + length;
+}
+function untangle(movable) {
+  const list = movable.filter(b => !b.fixed);
+  if (links.length < 2) return;
+  let best = tangle();
+  for (let pass = 0; pass < 3; pass++) {
+    let improved = false;
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const p = list[i], q = list[j];
+        [p.x, q.x] = [q.x, p.x]; [p.y, q.y] = [q.y, p.y];
+        const cost = tangle();
+        if (cost < best - 1) { best = cost; improved = true; }
+        else { [p.x, q.x] = [q.x, p.x]; [p.y, q.y] = [q.y, p.y]; }
+      }
+    }
+    if (!improved) break;
+  }
+}
+function settle(start = 1, ticks = 300, fresh = true) {
+  let a = start;
+  for (let i = 0; i < ticks; i++) { tick(a); a = Math.max(0.02, a * 0.985); }
+  if (fresh) {
+    const list = [...bodies.values()];
+    untangle(list);
+    for (let i = 0; i < 120; i++) { tick(0.15 * 0.97 ** i); }
+  }
+  for (const b of bodies.values()) { b.vx = b.vy = 0; }
+  render();
+}
+function wake(level = 0.3) {
+  alpha = Math.max(alpha, level);
+  if (calm || frame) return;
+  const step = () => {
+    alpha = Math.max(target, alpha * 0.975);
+    tick(alpha);
+    render();
+    frame = alpha > 0.004 || target ? requestAnimationFrame(step) : 0;
+    if (!frame) { save(); }
+  };
+  frame = requestAnimationFrame(step);
+}
+function applyLayout(reset = false) {
+  const had = positions.size > 0 && !reset;
+  if (reset) { positions.clear(); bodies = new Map(); }
+  build(positions);
+  const added = [...bodies.values()].some(b => b.fresh);
+  for (const b of bodies.values()) b.fresh = false;
+  if (!had) settle(1, 300, true);
+  else if (added) settle(0.5, 160, false);
+  else render();
+  if (!had) fit();
   applyView();
+  save();
 }
 function inspect(id, expanded = new Set()) {
   const detail = $$('.inspector').find(el => el.dataset.ideaDetail === id);
@@ -162,9 +309,8 @@ document.addEventListener('pointerdown', event => {
     return;
   }
   if (!node) return;
-  const svg = node.ownerSVGElement;
-  const start = point(event, svg);
-  dragging = {node, svg, start, x: +node.dataset.x, y: +node.dataset.y, id: event.pointerId, moved: false};
+  const svg = node.ownerSVGElement, body = bodies.get(node.dataset.node);
+  dragging = {node, body, svg, start: point(event, svg), x: body.x, y: body.y, id: event.pointerId, moved: false};
   node.setPointerCapture(event.pointerId);
 });
 document.addEventListener('pointermove', event => {
@@ -176,15 +322,13 @@ document.addEventListener('pointermove', event => {
     return;
   }
   if (dragging?.id !== event.pointerId) return;
-  const {node, svg, start, x, y} = dragging;
+  const {body, svg, start, x, y} = dragging;
   const p = point(event, svg), dx = p.x - start.x, dy = p.y - start.y;
   if (!dragging.moved && Math.hypot(dx, dy) < 4) return;
-  dragging.moved = true;
-  const rect = svg.viewBox.baseVal;
-  const wanted = [Math.max(NODE_W / 2, Math.min(rect.width - NODE_W / 2, x + dx)),
-    Math.max(NODE_H / 2, Math.min(rect.height - NODE_H / 2, y + dy))];
-  setPosition(node, ...clear(node, ...wanted, [+node.dataset.x, +node.dataset.y]));
-  drawArrows();
+  if (!dragging.moved) { dragging.moved = true; body.fixed = true; target = 0.25; }
+  body.x = x + dx;
+  body.y = y + dy;
+  if (calm) { separate([...bodies.values()]); render(); } else wake(0.3);
 });
 function finishDrag(event) {
   if (panning?.id === event.pointerId) {
@@ -193,10 +337,12 @@ function finishDrag(event) {
     return;
   }
   if (dragging?.id !== event.pointerId) return;
-  const {node, moved} = dragging;
+  const {node, body, moved} = dragging;
   dragging = undefined;
+  target = 0;
   if (moved) {
-    positions.set(node.dataset.node, [+node.dataset.x, +node.dataset.y]);
+    body.fixed = false;
+    wake(0.2);
     save();
   } else if (event.type === 'pointerup') {
     inspect(node.dataset.node === selected ? undefined : node.dataset.node);
@@ -222,16 +368,10 @@ document.addEventListener('click', event => {
   const zoom = event.target.closest('[data-zoom]');
   if (zoom) {
     const box = $('.graph').viewBox.baseVal;
-    if (zoom.dataset.zoom === 'fit') {
-      view = {k: 1, x: 0, y: 0};
-      applyView();
-    } else zoomAt(zoom.dataset.zoom === 'in' ? 1.25 : 0.8, box.width / 2, box.height / 2);
+    if (zoom.dataset.zoom === 'fit') fit();
+    else zoomAt(zoom.dataset.zoom === 'in' ? 1.25 : 0.8, box.width / 2, box.height / 2);
   }
-  if (event.target.closest('[data-reset]')) {
-    positions.clear();
-    save();
-    applyLayout();
-  }
+  if (event.target.closest('[data-reset]')) applyLayout(true);
   if (event.target.closest('[data-close]')) closeInspector();
 });
 document.addEventListener('change', event => {
