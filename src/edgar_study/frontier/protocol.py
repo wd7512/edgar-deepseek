@@ -74,6 +74,7 @@ def fit_training(
     starts=STARTS,
     seed=0,
     warm=None,
+    start=None,
     relative_step=RELATIVE_STEP,
     prune_after=PRUNE_AFTER,
     guard=GUARD,
@@ -86,9 +87,15 @@ def fit_training(
     Starts are the estimator's start plus seeded jitter. `warm` (cells, parameters), when given, replaces
     the last jittered start, so the other starts are the same ones a cold fit with one fewer start would
     use. It is ignored when only one start is allowed.
+
+    `start` (cells, parameters), when given, is used in place of the estimator's start, so a caller can
+    give several models the same starting information.
     """
     xt, yt = np.asarray(xt), np.asarray(yt)
-    start = np.stack([np.asarray(estimator(xt[i], yt[i]), dtype=np.float32) for i in range(len(xt))])
+    if start is None:
+        start = np.stack([np.asarray(estimator(xt[i], yt[i]), dtype=np.float32) for i in range(len(xt))])
+    else:
+        start = np.asarray(start, dtype=np.float32)
     candidates = jittered_starts(start, xt, yt, starts, seed, JITTER)
     if warm is not None and starts > 1:
         warm = np.asarray(warm, dtype=candidates.dtype)

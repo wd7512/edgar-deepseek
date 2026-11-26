@@ -269,6 +269,28 @@ def main():
     ab.add_argument("--max-iter", type=int, default=2000)
     ab.set_defaults(func=lambda args: _load("frontier.ab", "run")(args))
 
+    comparison = commands.add_parser(
+        "compare",
+        parents=[dataset, upstream],
+        help="Compare frontier candidates with the paper equation and double Gaussian under one protocol.",
+    )
+    comparison.add_argument("--wave", type=Path, required=True, help="A run's wave.json for candidates.")
+    comparison.add_argument("--output", type=Path, required=True)
+    comparison.add_argument("--protocol", choices=("native", "common-start"), default="common-start")
+    comparison.add_argument(
+        "--cohort", choices=("exploration", "confirmation", "discovery"), default="confirmation"
+    )
+    comparison.add_argument("--top", type=int, default=3, help="Best nodes to compare, by exploration score.")
+    comparison.add_argument("--nodes", help="Comma-separated node IDs instead of --top.")
+    comparison.add_argument("--starts", type=int, default=5)
+    comparison.add_argument("--seed", type=int, default=0)
+    comparison.add_argument("--max-iter", type=int, default=2000)
+    comparison.add_argument("--cells", type=int, help="Use only the first N cells of the cohort.")
+    comparison.add_argument(
+        "--against", type=Path, help="Another summary.json to add; refused if its protocol differs."
+    )
+    comparison.set_defaults(func=lambda args: _load("frontier.compare", "run")(args))
+
     viewer = commands.add_parser("frontier-view", help="Serve a live frontier graph and batch replay.")
     viewer.add_argument("--run", type=Path, required=True, help="Run directory or wave.json.")
     viewer.add_argument("--port", type=int, default=8765)
