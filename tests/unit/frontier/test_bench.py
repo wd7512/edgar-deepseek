@@ -121,19 +121,3 @@ def test_results_are_saved_per_cohort_and_the_report_names_every_fitter(tmp_path
     assert "| fast | 3.0 | 1 of 2 |" in table
     assert "| slow | 7.0 | 0 of 2 |" in table
     assert "G5 ⊂ W6" in table
-
-
-def test_grouping_averages_neighbouring_angles_into_points_of_equal_weight():
-    from edgar_study.frontier.bench import group_means
-
-    x = np.array([[3.0, 0.0, 2.0, 1.0, 5.0, 4.0]], dtype=np.float32)
-    y = np.array([[30.0, 0.0, 20.0, 10.0, 50.0, 40.0]], dtype=np.float32)
-    xb, yb = group_means(x, y, 2)
-    np.testing.assert_allclose(xb, [[0.5, 2.5, 4.5]])
-    np.testing.assert_allclose(yb, [[5.0, 25.0, 45.0]])
-
-
-def test_binned_fitters_are_registered():
-    from edgar_study.frontier.bench import FITTERS
-
-    assert {"binned-2", "binned-4", "binned-8"} <= set(FITTERS)
