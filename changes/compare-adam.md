@@ -1,0 +1,1 @@
+Add an Adam fitter with per-cell early stopping (`--fitter adam`, `--max-iter` as the step cap, `--patience`, `--tolerance`, `--learning-rate`) to `edgar compare`. Each fit keeps its lowest-loss parameters, so it never ends worse than its start. The optimizer and its settings are part of the protocol, so results from different optimizers are refused.

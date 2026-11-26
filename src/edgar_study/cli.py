@@ -238,6 +238,13 @@ def main():
         default=None,
         help="Weight parents and revisits by exp(-(score - lowest) / T); the model never sees scores.",
     )
+    frontier.add_argument(
+        "--rank-bias",
+        type=float,
+        default=None,
+        help="Weight every node choice by 1 / (1 + B * rank / worst rank), best score first; the worst node is"
+        " 1 / (1 + B) as likely as the best. Not with --temperature.",
+    )
     frontier.add_argument("--finalize", action="store_true", help="Use selection and locked-test cells once.")
     frontier.set_defaults(func=lambda args: _load("frontier.runner", "run")(args))
 
@@ -268,6 +275,36 @@ def main():
     ab.add_argument("--seed", type=int, default=0)
     ab.add_argument("--max-iter", type=int, default=2000)
     ab.set_defaults(func=lambda args: _load("frontier.ab", "run")(args))
+
+    comparison = commands.add_parser(
+        "compare",
+        parents=[dataset, upstream],
+        help="Compare frontier candidates with the paper equation and double Gaussian under one protocol.",
+    )
+    comparison.add_argument("--wave", type=Path, required=True, help="A run's wave.json for candidates.")
+    comparison.add_argument("--output", type=Path, required=True)
+    comparison.add_argument("--protocol", choices=("native", "common-start"), default="common-start")
+    comparison.add_argument(
+        "--cohort", choices=("exploration", "confirmation", "discovery"), default="confirmation"
+    )
+    comparison.add_argument("--top", type=int, default=3, help="Best nodes to compare, by exploration score.")
+    comparison.add_argument("--nodes", help="Comma-separated node IDs instead of --top.")
+    comparison.add_argument("--starts", type=int, default=5)
+    comparison.add_argument("--seed", type=int, default=0)
+    comparison.add_argument("--max-iter", type=int, default=2000)
+    comparison.add_argument("--fitter", choices=("lm-bounded", "adam"), default="lm-bounded")
+    comparison.add_argument("--learning-rate", type=float, default=3e-3, help="Adam only.")
+    comparison.add_argument(
+        "--patience", type=int, default=200, help="Adam: steps without improvement before a fit stops."
+    )
+    comparison.add_argument(
+        "--tolerance", type=float, default=1e-6, help="Adam: relative improvement that resets patience."
+    )
+    comparison.add_argument("--cells", type=int, help="Use only the first N cells of the cohort.")
+    comparison.add_argument(
+        "--against", type=Path, help="Another summary.json to add; refused if its protocol differs."
+    )
+    comparison.set_defaults(func=lambda args: _load("frontier.compare", "run")(args))
 
     viewer = commands.add_parser("frontier-view", help="Serve a live frontier graph and batch replay.")
     viewer.add_argument("--run", type=Path, required=True, help="Run directory or wave.json.")

@@ -181,3 +181,21 @@ Every equation gets the same fit budget: five starts per neuron (`--starts`, def
 Equation expressions may use a comparison with `<`, `<=`, `>`, or `>=` as a real-valued smooth cutoff, for example `sigmoid(20 × (limit − x))`, so its limit can be fitted. An undeclared symbol is rejected with an `unknown_name` reason naming it. Invalid proposals and unreadable replies are handled in the batch conversation described above.
 
 Held-out trials never select parameters. Held-out MSE can still rise even when training MSE falls, and the score separately penalizes additional parameters. The equation details show both errors. Runs started under an older fitting protocol are replayable but cannot be resumed under the new one.
+
+## Comparing with the paper: `edgar compare`
+
+An exploration score is not a fair comparison with the paper equation or the double Gaussian. A candidate's score depends on the cells it was found on, the starts and the optimizer budget it was fitted with, and what it was given as a starting point, and these can reverse a ranking. `edgar compare` fixes all of them and writes them to `summary.json`.
+
+```bash
+uv run edgar compare --dataset $DATA --wave results/<run>/wave.json --output results/compare/<name> --protocol common-start --cohort confirmation --top 3
+```
+
+- **Candidates** are the best-scoring fitted equation of each of the top `--top` nodes (or `--nodes`), not the first one fitted. The paper's 11-parameter equation and the double Gaussian are always included as controls.
+- **Cohorts** are `exploration`, `confirmation` or `discovery`. Selection and locked-test cells cannot be requested.
+- **`common-start`** fits the double Gaussian to each cell's training trials, maps that fit into every model by parameter name (exactly for the paper equation), and starts every model, the double Gaussian included, from that point with the same jittered starts and seeds. This is the equal-budget comparison: every model gets the same starting information.
+- **`native`** starts each model from its own estimator, or from a candidate's declared values. This is the best-known comparison and favours models with a good estimator.
+- Every model is fitted on training trials only and scored on held-out trials, with the same parameter penalty. The report gives each model's score and its paired per-cell difference from each control with a standard error. A difference within about two standard errors is a tie.
+- `--fitter adam` fits with Adam instead of bounded Levenberg-Marquardt, with `--max-iter` as the step cap (for example 10000) and early stopping per fit (`--patience` steps without a relative `--tolerance` improvement). Fits that stopped at the cap are not flagged yet. The optimizer and its settings are part of the protocol.
+- `--against` adds the models from another `summary.json` and refuses if its protocol, cohort, starts, seed or iteration cap differ.
+
+Scores from different protocols, cohorts or optimizer budgets are not comparable and should not be placed in one table.

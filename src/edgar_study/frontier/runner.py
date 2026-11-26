@@ -64,14 +64,16 @@ async def execute(
     starts=STARTS,
     patience=PATIENCE,
     temperature=None,
+    rank_bias=None,
 ):
     """Explore rolling waves, then confirm a frozen shortlist; optionally select and test once.
 
     Each batch is a conversation: the model may check equations before answering, and every equation
     that cannot be used is reported back for replacement, for up to `patience` follow-up turns.
 
-    With a `temperature` (in score units), the scheduler weights parents and revisits by exploration
-    score and each idea's reference becomes its best-scoring equation. The model never sees a score.
+    With a `temperature` (in score units) or a `rank_bias`, the scheduler weights every choice of a node by
+    exploration score (the temperature by score gap, the rank bias by rank alone) and each idea's reference
+    becomes its best-scoring equation. The model never sees a score.
     """
     discovery = ideas is None
     ideas = () if discovery else ideas
@@ -84,6 +86,9 @@ async def execute(
         raise ValueError("Patience must be zero or more follow-up turns.")
     if temperature is not None and not temperature > 0:
         raise ValueError("Temperature must be positive.")
+    if rank_bias is not None and (temperature is not None or not rank_bias >= 0):
+        raise ValueError("Rank bias must be zero or more and cannot be combined with a temperature.")
+    guided = temperature is not None or rank_bias is not None
     output.mkdir(parents=True, exist_ok=True)
     path = output / "wave.json"
     if path.exists() and not resume:
@@ -120,19 +125,21 @@ async def execute(
         config["new_probability"] = new_probability
     if temperature is not None:
         config["temperature"] = temperature
+    if rank_bias is not None:
+        config["rank_bias"] = rank_bias
     explored: dict[str, Any] = {}
     fitted_parents: dict[tuple, tuple] = {}
 
     def next_choice(step):
+        guide = None
+        if discovery and guided or rank_bias is not None:
+            scores = {node: result["score"] for node, result in metrics.items()}
+            if "score" in explored:
+                scores[BASELINE_ID] = explored["score"]
+            guide = Guide(scores, temperature, rank_bias)
         if discovery:
-            guide = None
-            if temperature is not None:
-                scores = {node: result["score"] for node, result in metrics.items()}
-                if "score" in explored:
-                    scores[BASELINE_ID] = explored["score"]
-                guide = Guide(scores, temperature)
             return draw_generated(nodes, references, history, rng, new_probability, step, guide)
-        return draw(ideas, references, attempts, rng, depth)
+        return draw(ideas, references, attempts, rng, depth, guide)
 
     def track_proposals(event):
         if not discovery:
@@ -150,7 +157,7 @@ async def execute(
 
     def adopt(node, candidate, result, parents):
         """Make a fitted equation the idea's reference: its first, or with a temperature its best."""
-        if node in references and (temperature is None or result["score"] >= metrics[node]["score"]):
+        if node in references and (not guided or result["score"] >= metrics[node]["score"]):
             return
         references[node], metrics[node], lineage[node] = candidate, result, parents
 
@@ -507,6 +514,8 @@ def _run(args, output):
         raise SystemExit("--new-probability must be between zero and one.")
     if args.temperature is not None and not args.temperature > 0:
         raise SystemExit("--temperature must be positive.")
+    if args.rank_bias is not None and (args.temperature is not None or not args.rank_bias >= 0):
+        raise SystemExit("--rank-bias must be zero or more and cannot be combined with --temperature.")
     entry = fetch_models(load_key()).get(MODEL)
     if not entry or not is_free(entry) or "image/png" not in entry["modalities"]["input"]:
         raise SystemExit(f"{MODEL} is not confirmed free with PNG support.")
@@ -527,6 +536,7 @@ def _run(args, output):
         "starts": args.starts,
         "patience": args.patience,
         "temperature": args.temperature,
+        "rank_bias": args.rank_bias,
         "waves": args.waves,
         "finalize": args.finalize,
         "idea_source": "generated" if ideas is None else "catalog",
@@ -562,6 +572,7 @@ def _run(args, output):
                 starts=args.starts,
                 patience=args.patience,
                 temperature=args.temperature,
+                rank_bias=args.rank_bias,
                 resume=args.resume,
             )
         finally:
