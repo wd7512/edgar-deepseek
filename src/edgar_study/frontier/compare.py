@@ -38,7 +38,17 @@ from edgar_study.upstream import MSE_SCALE, PENALTY, import_upstream
 
 PROTOCOLS = ("native", "common-start")
 COHORTS = ("exploration", "confirmation", "discovery")
-SAME_PROTOCOL = ("protocol", "cohort", "starts", "seed", "max_iter")
+SAME_PROTOCOL = (
+    "protocol",
+    "cohort",
+    "starts",
+    "seed",
+    "max_iter",
+    "fitter",
+    "learning_rate",
+    "patience",
+    "tolerance",
+)
 PAPER = "paper_equation"
 PAPER_LINKS = {
     "theta_pref": ("m", None),
@@ -137,20 +147,37 @@ def _cell_errors(model, params, x, y):
     )
 
 
-def evaluate(specs, cohort, protocol, *, max_iter, starts, seed, reference=BASELINE_ID):
+def evaluate(
+    specs,
+    cohort,
+    protocol,
+    *,
+    max_iter,
+    starts,
+    seed,
+    reference=BASELINE_ID,
+    fitter="lm-bounded",
+    learning_rate=3e-3,
+    patience=200,
+    tolerance=1e-6,
+):
     """Fit every spec on training trials only and score it on held-out trials under one protocol."""
     if protocol not in PROTOCOLS:
         raise ValueError(f"Unknown protocol {protocol!r}: choose from {PROTOCOLS}.")
     x, y = np.asarray(cohort[0]), np.asarray(cohort[1])
     train, held = split_trials(x)
     xt, yt, xh, yh = x[:, train], y[:, train], x[:, held], y[:, held]
-    budget = min(max_iter, fitting.LM_ITERATIONS)
+    budget = max_iter if fitter == "adam" else min(max_iter, fitting.LM_ITERATIONS)
+    options = {
+        "fitter": fitter,
+        "adam": {"learning_rate": learning_rate, "patience": patience, "tolerance": tolerance},
+    }
     shared = None
     summary = None
     if protocol == "common-start":
         base = next(spec for spec in specs if spec.name == reference)
         shared = np.asarray(
-            fit_training(base.model, base.estimator, xt, yt, budget, starts=starts, seed=seed)
+            fit_training(base.model, base.estimator, xt, yt, budget, starts=starts, seed=seed, **options)
         )
         summary = {
             "model": reference,
@@ -165,7 +192,9 @@ def evaluate(specs, cohort, protocol, *, max_iter, starts, seed, reference=BASEL
             )
             start = own if shared is None else start_for(spec, shared, own)
             params = np.asarray(
-                fit_training(spec.model, None, xt, yt, budget, starts=starts, seed=seed, start=start)
+                fit_training(
+                    spec.model, None, xt, yt, budget, starts=starts, seed=seed, start=start, **options
+                )
             )
             cell_mse, cell_training = (
                 _cell_errors(spec.model, params, xh, yh),
@@ -197,7 +226,7 @@ def report(result, controls=(BASELINE_ID, PAPER)):
     controls = [name for name in controls if name in models and "error" not in models[name]]
     lines = [
         f"Protocol {protocol['protocol']}, cohort {protocol['cohort']}, {protocol['starts']} starts, "
-        f"seed {protocol['seed']}, at most {protocol['max_iter']} iterations. Lower is better; "
+        f"seed {protocol['seed']}, {protocol.get('fitter') or 'lm-bounded'}, at most {protocol['max_iter']} iterations. Lower is better; "
         "differences are paired by cell, negative means better than the control.",
         "",
         "| model | params | training MSE | held-out MSE | score | "
@@ -258,8 +287,11 @@ def run(args):
         "starts": args.starts,
         "seed": args.seed,
         "max_iter": args.max_iter,
-        "fitter": "lm-bounded",
-        "relative_step": True,
+        "fitter": args.fitter,
+        "learning_rate": args.learning_rate if args.fitter == "adam" else None,
+        "patience": args.patience if args.fitter == "adam" else None,
+        "tolerance": args.tolerance if args.fitter == "adam" else None,
+        "relative_step": args.fitter == "lm-bounded",
         "jitter": JITTER,
         "reference": BASELINE_ID if args.protocol == "common-start" else None,
         "trial_seed": TRIAL_SEED,
@@ -280,6 +312,10 @@ def run(args):
         max_iter=args.max_iter,
         starts=args.starts,
         seed=args.seed,
+        fitter=args.fitter,
+        learning_rate=args.learning_rate,
+        patience=args.patience,
+        tolerance=args.tolerance,
     )
     result["protocol"] = protocol
     result["equations"] = proposals

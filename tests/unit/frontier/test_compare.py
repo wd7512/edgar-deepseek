@@ -169,3 +169,41 @@ def test_the_report_names_the_protocol_and_every_model_with_its_difference_from_
 
 def test_module_exports_what_the_command_needs():
     assert callable(compare.run)
+
+
+def test_adam_with_early_stopping_stops_before_the_cap_and_never_ends_worse_than_the_start():
+    from edgar_study.fitting import fit_adam_from_starts
+
+    theta, y = _cohort(cells=6)
+    start = np.tile(np.array([[1.0, 0.2, 1.0, 0.5, 0.5]]), (6, 1))[None].astype(np.float32)
+    fit = fit_adam_from_starts(_double_gaussian, start, theta, y, max_steps=4000, patience=50, tolerance=1e-3)
+    before = np.mean((np.asarray(_double_gaussian(jnp.asarray(theta[0]), *start[0, 0])) - y[0]) ** 2)
+    after = np.mean((np.asarray(_double_gaussian(jnp.asarray(theta[0]), *fit.params[0])) - y[0]) ** 2)
+    assert after <= before and np.isfinite(fit.params).all()
+    assert fit.steps < 4000 and fit.stopped.all()
+
+
+def test_adam_keeps_the_best_of_several_starts_per_cell():
+    from edgar_study.fitting import fit_adam_from_starts
+
+    theta, y = _cohort(cells=4)
+    good = np.tile(np.array([[3.0, 0.3, 2.0, 0.8, 0.6]]), (4, 1)).astype(np.float32)
+    bad = good * 0 + np.array([0.0, 5.0, 0.0, 0.0, 3.0], dtype=np.float32)
+    fit = fit_adam_from_starts(_double_gaussian, np.stack([bad, good]), theta, y, max_steps=50, patience=10)
+    assert fit.best.shape == (4,) and set(fit.best.tolist()) <= {0, 1}
+    assert (fit.costs <= fit.costs.max()).all() and np.isfinite(fit.costs).all()
+
+
+def test_under_adam_a_model_containing_the_reference_never_trains_worse_than_it():
+    result = evaluate(
+        _specs(), _cohort(), "common-start", max_iter=200, starts=2, seed=0, fitter="adam", patience=30
+    )
+    reference = result["reference"]["training_mse"]
+    for name in ("double_gaussian", "idea-1"):
+        assert result["models"][name]["training_mse"] <= reference + 1e-6
+
+
+def test_results_from_different_optimizers_are_not_comparable():
+    one = {"protocol": "common-start", "cohort": "confirmation", "starts": 5, "seed": 0, "max_iter": 2000}
+    with pytest.raises(ValueError, match="fitter"):
+        refuse_mixed({**one, "fitter": "adam"}, {**one, "fitter": "lm-bounded"})

@@ -479,6 +479,86 @@ def fit_from_starts(
     return MultiStartFit(fit.params.reshape(k, cells, n)[best, cell], best, costs[best, cell])
 
 
+class AdamFit(NamedTuple):
+    params: np.ndarray
+    best: np.ndarray
+    costs: np.ndarray
+    steps: int
+    stopped: np.ndarray
+
+
+def fit_adam_from_starts(
+    model,
+    candidates,
+    x,
+    y,
+    max_steps=10_000,
+    learning_rate=3e-3,
+    patience=200,
+    tolerance=1e-6,
+    band=None,
+):
+    """Fit every start in `candidates` (starts, cells, parameters) with Adam and keep each cell's best.
+
+    Every start of every cell is its own independent fit on its training trials. A fit stops once
+    `patience` steps pass without lowering its loss by more than a relative `tolerance` below the loss at
+    its last such improvement, or at `max_steps`, or when its loss turns nonfinite. Each fit keeps the
+    parameters of its lowest loss, which can be its start, so it never ends worse than where it began.
+    With a `band`, a fit whose curve leaves its cell's response band is chosen only if every start for
+    that cell does. `stopped` marks the chosen fits that stopped early rather than at the cap.
+    """
+    import optax
+
+    candidates = np.asarray(candidates, dtype=np.float32)
+    k, cells, n = candidates.shape
+    x_all = jnp.asarray(np.tile(np.asarray(x), (k, 1)))
+    y_all = jnp.asarray(np.tile(np.asarray(y), (k, 1)))
+
+    def loss(p, xc, yc):
+        return jnp.mean((model(xc, *p) - yc) ** 2)
+
+    value_and_grad = jax.vmap(jax.value_and_grad(loss))
+    opt = optax.adam(learning_rate)
+    start = jnp.asarray(candidates.reshape(k * cells, n))
+
+    def cond(state):
+        step, _, _, _, _, _, stall = state
+        return (step < max_steps) & ~jnp.all(stall >= patience)
+
+    def body(state):
+        step, p, opt_state, best_loss, best_p, reference, stall = state
+        value, grad = value_and_grad(p, x_all, y_all)
+        finite = jnp.isfinite(value)
+        value = jnp.where(finite, value, jnp.inf)
+        better = value < best_loss
+        best_loss = jnp.where(better, value, best_loss)
+        best_p = jnp.where(better[:, None], p, best_p)
+        enough = value < reference * (1 - tolerance)
+        reference = jnp.where(enough, value, reference)
+        stall = jnp.where(finite, jnp.where(enough, 0, stall + 1), patience)
+        updates, opt_state = opt.update(grad, opt_state, p)
+        return step + 1, optax.apply_updates(p, updates), opt_state, best_loss, best_p, reference, stall
+
+    @jax.jit
+    def run(p):
+        none = jnp.full(p.shape[0], jnp.inf)
+        return jax.lax.while_loop(cond, body, (0, p, opt.init(p), none, p, none, jnp.zeros(p.shape[0], int)))
+
+    steps, _, _, best_loss, best_p, _, stall = jax.device_get(run(start))
+    costs = np.asarray(best_loss).reshape(k, cells)
+    costs = np.where(np.isfinite(costs), costs, np.inf)
+    best_p = np.asarray(best_p)
+    if band is not None:
+        inside = within_band(model, best_p, np.tile(np.asarray(band), (k, 1))).reshape(k, cells)
+        costs = np.where(inside.any(axis=0), np.where(inside, costs, np.inf), costs)
+    best = np.argmin(costs, axis=0)
+    cell = np.arange(cells)
+    stopped = (np.asarray(stall) >= patience).reshape(k, cells)
+    return AdamFit(
+        best_p.reshape(k, cells, n)[best, cell], best, costs[best, cell], int(steps), stopped[best, cell]
+    )
+
+
 def fit_pruned(
     model,
     candidates,

@@ -195,6 +195,7 @@ uv run edgar compare --dataset $DATA --wave results/<run>/wave.json --output res
 - **`common-start`** fits the double Gaussian to each cell's training trials, maps that fit into every model by parameter name (exactly for the paper equation), and starts every model, the double Gaussian included, from that point with the same jittered starts and seeds. This is the equal-budget comparison: every model gets the same starting information.
 - **`native`** starts each model from its own estimator, or from a candidate's declared values. This is the best-known comparison and favours models with a good estimator.
 - Every model is fitted on training trials only and scored on held-out trials, with the same parameter penalty. The report gives each model's score and its paired per-cell difference from each control with a standard error. A difference within about two standard errors is a tie.
+- `--fitter adam` fits with Adam instead of bounded Levenberg-Marquardt, with `--max-iter` as the step cap (for example 10000) and early stopping per fit (`--patience` steps without a relative `--tolerance` improvement). Fits that stopped at the cap are not flagged yet. The optimizer and its settings are part of the protocol.
 - `--against` adds the models from another `summary.json` and refuses if its protocol, cohort, starts, seed or iteration cap differ.
 
 Scores from different protocols, cohorts or optimizer budgets are not comparable and should not be placed in one table.

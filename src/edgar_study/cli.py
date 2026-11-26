@@ -285,6 +285,14 @@ def main():
     comparison.add_argument("--starts", type=int, default=5)
     comparison.add_argument("--seed", type=int, default=0)
     comparison.add_argument("--max-iter", type=int, default=2000)
+    comparison.add_argument("--fitter", choices=("lm-bounded", "adam"), default="lm-bounded")
+    comparison.add_argument("--learning-rate", type=float, default=3e-3, help="Adam only.")
+    comparison.add_argument(
+        "--patience", type=int, default=200, help="Adam: steps without improvement before a fit stops."
+    )
+    comparison.add_argument(
+        "--tolerance", type=float, default=1e-6, help="Adam: relative improvement that resets patience."
+    )
     comparison.add_argument("--cells", type=int, help="Use only the first N cells of the cohort.")
     comparison.add_argument(
         "--against", type=Path, help="Another summary.json to add; refused if its protocol differs."

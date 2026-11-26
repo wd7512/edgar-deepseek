@@ -75,6 +75,8 @@ def fit_training(
     seed=0,
     warm=None,
     start=None,
+    fitter="lm-bounded",
+    adam=None,
     relative_step=RELATIVE_STEP,
     prune_after=PRUNE_AFTER,
     guard=GUARD,
@@ -87,6 +89,9 @@ def fit_training(
     Starts are the estimator's start plus seeded jitter. `warm` (cells, parameters), when given, replaces
     the last jittered start, so the other starts are the same ones a cold fit with one fewer start would
     use. It is ignored when only one start is allowed.
+
+    `fitter` is `lm-bounded` (default) or `adam`; `adam` takes `max_iter` as its step cap and the options
+    in `adam` (`learning_rate`, `patience`, `tolerance`) for early stopping.
 
     `start` (cells, parameters), when given, is used in place of the estimator's start, so a caller can
     give several models the same starting information.
@@ -103,6 +108,12 @@ def fit_training(
             raise ValueError(f"Warm start has shape {warm.shape}, expected {start.shape}.")
         candidates[-1] = warm
     band = fitting.response_band(yt) if guard else None
+    if fitter == "adam":
+        return fitting.fit_adam_from_starts(
+            model, candidates, xt, yt, max_steps=max_iter, band=band, **(adam or {})
+        ).params
+    if fitter != "lm-bounded":
+        raise ValueError(f"Unknown fitter {fitter!r}: choose lm-bounded or adam.")
     if prune_after is not None:
         return fitting.fit_pruned(
             model,
