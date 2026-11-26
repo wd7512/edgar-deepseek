@@ -463,14 +463,15 @@ def test_a_run_with_no_fitted_equation_reports_it_and_stops(tmp_path):
     assert result["confirmation"] == []
 
 
-def test_an_interrupted_run_resumes_to_the_same_result_as_an_uninterrupted_one(tmp_path):
-    whole, _ = explore(tmp_path / "whole", seed=11, batches=5)
+@pytest.mark.parametrize("guided", [{}, {"temperature": 0.1}])
+def test_an_interrupted_run_resumes_to_the_same_result_as_an_uninterrupted_one(tmp_path, guided):
+    whole, _ = explore(tmp_path / "whole", seed=11, batches=5, **guided)
     with pytest.raises(InterruptedError):
-        explore(tmp_path / "split", seed=11, batches=5, interrupt_at=4)
+        explore(tmp_path / "split", seed=11, batches=5, interrupt_at=4, **guided)
     paused = json.loads((tmp_path / "split" / "wave.json").read_text())
     assert len(paused["episodes"]) == 3
     assert paused["status"] == "exploring"
-    resumed, _ = explore(tmp_path / "split", seed=11, batches=5, resume=True)
+    resumed, _ = explore(tmp_path / "split", seed=11, batches=5, resume=True, **guided)
     assert outcomes(resumed) == outcomes(whole)
     assert [e["prompt"] for e in resumed["episodes"]] == [e["prompt"] for e in whole["episodes"]]
 
@@ -559,6 +560,7 @@ def args(output, **overrides):
         "k": 1,
         "starts": 4,
         "patience": 3,
+        "temperature": None,
         "seed": 0,
         "graph": None,
         "new_probability": 0.8,
@@ -588,7 +590,15 @@ def test_a_new_run_refuses_an_existing_output_directory(tmp_path):
 
 @pytest.mark.parametrize(
     "overrides",
-    [{"waves": 0}, {"batches": 0}, {"k": 0}, {"seed": -1}, {"new_probability": 2}, {"patience": -1}],
+    [
+        {"waves": 0},
+        {"batches": 0},
+        {"k": 0},
+        {"seed": -1},
+        {"new_probability": 2},
+        {"patience": -1},
+        {"temperature": 0},
+    ],
 )
 def test_run_rejects_unusable_options_before_touching_the_network(tmp_path, overrides):
     with pytest.raises(SystemExit):
@@ -688,3 +698,39 @@ def test_the_model_can_check_equations_before_answering_and_only_its_answer_is_f
     assert [(row["status"], row["turn"]) for row in event["candidates"]] == [("fitted", 1)]
     assert len(histories) == 1 and result["config"]["patience"] == 2
     assert '{"check": [' in event["prompt"] and "2 follow-up turns" in event["prompt"]
+
+
+@pytest.mark.parametrize(
+    ("temperature", "reference"), [(None, "b + a*cos(2*theta)"), (0.1, "b + a*cos(theta)")]
+)
+def test_with_a_temperature_a_better_revisit_becomes_the_ideas_reference(tmp_path, temperature, reference):
+    x, y = cohort()
+    idea = {"title": "Harmonic", "mechanism": "harmonic", "change": "Use a harmonic."}
+
+    class Stub:
+        async def submit(self, batch, prompt):
+            if prompt.startswith("Revisit"):
+                return json.dumps([{"equation": "b + a*cos(theta)", "initial": {"b": 2, "a": 1}}])
+            return json.dumps(
+                {"idea": idea, "equations": [{"equation": "b + a*cos(2*theta)", "initial": {"b": 2, "a": 1}}]}
+            )
+
+        async def retry(self, batch, prompt, history):
+            return "[]"
+
+    result = asyncio.run(
+        execute(
+            import_upstream(ROOT),
+            Stub(),
+            (x, y),
+            (x, y),
+            tmp_path,
+            batches=2,
+            new_probability=0,
+            max_iter=0,
+            temperature=temperature,
+        )
+    )
+    assert [e["kind"] for e in result["episodes"]] == ["new", "revisit"]
+    assert result["shortlist"]["idea-1"]["equation"] == reference
+    assert result["config"].get("temperature") == temperature

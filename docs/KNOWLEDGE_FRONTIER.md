@@ -157,6 +157,15 @@ Each batch is a short conversation with HY4, bounded by `--patience` follow-up t
 
 When patience runs out the batch keeps what it has, and `ended` in the episode records why. On the last turn HY4 is told that checking is no longer available. Feedback never includes metrics, numerical fit outcomes or ranks. A failed fit is reported only as "could not be fitted". Revisits list up to eight previously tried equations for that idea so HY4 can avoid repeats.
 
+### Guided scheduling
+
+By default the scheduler is score-blind: parents, modes and revisits are drawn without regard to fit quality. With `--temperature T` (in score units, for example 0.1), only the scheduler uses exploration scores; the model never sees one:
+
+- Each eligible parent, the double Gaussian included, is drawn with weight exp(−(score − lowest)/T). Every parent keeps some chance.
+- Revisits multiply their validity weight by the same factor. Ideas with no fitted equation get a small fixed weight.
+- New-idea modes shift towards building on and combining good ideas: single idea 50%, anomaly detour 15%, combination 30%, independent root 5%.
+- Each idea's reference, which children build on and which is confirmed, becomes its best-scoring equation instead of its first.
+
 ## Watching the graph locally
 
 ```sh

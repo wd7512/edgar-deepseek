@@ -17,7 +17,15 @@ from edgar_study.datasets import DISCOVERY_PARTITION_SEED, discovery_partition, 
 from edgar_study.frontier.agent import FRESH, PATIENCE, check_proposal, check_report, converse
 from edgar_study.frontier.fits import double_gaussian_parent, measure
 from edgar_study.frontier.grammar import InvalidEquation, compile_equation
-from edgar_study.frontier.ideas import Idea, draw, draw_generated, generated_idea, route_mode, validate_graph
+from edgar_study.frontier.ideas import (
+    Guide,
+    Idea,
+    draw,
+    draw_generated,
+    generated_idea,
+    route_mode,
+    validate_graph,
+)
 from edgar_study.frontier.images import ParentFit, prepare_images
 from edgar_study.frontier.prompts import generated_prompt, idea_prompt, tool_note
 from edgar_study.frontier.protocol import STARTS, solve
@@ -55,11 +63,15 @@ async def execute(
     new_probability=0.8,
     starts=STARTS,
     patience=PATIENCE,
+    temperature=None,
 ):
     """Explore rolling waves, then confirm a frozen shortlist; optionally select and test once.
 
     Each batch is a conversation: the model may check equations before answering, and every equation
     that cannot be used is reported back for replacement, for up to `patience` follow-up turns.
+
+    With a `temperature` (in score units), the scheduler weights parents and revisits by exploration
+    score and each idea's reference becomes its best-scoring equation. The model never sees a score.
     """
     discovery = ideas is None
     ideas = () if discovery else ideas
@@ -70,6 +82,8 @@ async def execute(
         raise ValueError("Wave count, batch count, equations per batch and starts must be positive.")
     if patience < 0:
         raise ValueError("Patience must be zero or more follow-up turns.")
+    if temperature is not None and not temperature > 0:
+        raise ValueError("Temperature must be positive.")
     output.mkdir(parents=True, exist_ok=True)
     path = output / "wave.json"
     if path.exists() and not resume:
@@ -104,10 +118,20 @@ async def execute(
     }
     if discovery:
         config["new_probability"] = new_probability
+    if temperature is not None:
+        config["temperature"] = temperature
+    explored: dict[str, Any] = {}
+    fitted_parents: dict[tuple, tuple] = {}
 
     def next_choice(step):
         if discovery:
-            return draw_generated(nodes, references, history, rng, new_probability, step)
+            guide = None
+            if temperature is not None:
+                scores = {node: result["score"] for node, result in metrics.items()}
+                if "score" in explored:
+                    scores[BASELINE_ID] = explored["score"]
+                guide = Guide(scores, temperature)
+            return draw_generated(nodes, references, history, rng, new_probability, step, guide)
         return draw(ideas, references, attempts, rng, depth)
 
     def track_proposals(event):
@@ -124,8 +148,15 @@ async def execute(
                 equations.append(equation)
         del equations[:-8]
 
+    def adopt(node, candidate, result, parents):
+        """Make a fitted equation the idea's reference: its first, or with a temperature its best."""
+        if node in references and (temperature is None or result["score"] >= metrics[node]["score"]):
+            return
+        references[node], metrics[node], lineage[node] = candidate, result, parents
+
     if resume:
         saved = json.loads(path.read_text())
+        explored.update(saved.get("baseline_exploration") or {})
         fields = ("version", "seed", "idea_source", "planned_batches", "fit_protocol")
         if any(saved.get(key) != json.loads(json.dumps(wave[key])) for key in fields):
             raise ValueError("Run checkpoint does not match this frontier configuration.")
@@ -164,9 +195,7 @@ async def execute(
                 born.add(node)
                 if record["status"] == "fitted":
                     depth[nodes[node].branch] += 1
-                    if node not in references:
-                        references[node], metrics[node] = candidate, record["metrics"]
-                        lineage[node] = event["parents"]
+                    adopt(node, candidate, record["metrics"], event["parents"])
             track_proposals(event)
         if discovery:
             replayed = {event["node"] for event in saved["episodes"]}
@@ -183,11 +212,11 @@ async def execute(
     baseline_fit = double_gaussian_parent(up, starts)
     if "baseline_exploration" not in wave:
         wave["baseline_exploration"] = measure(baseline_fit.model, baseline_fit.solve, explore, max_iter)
-
-    fitted_parents: dict[tuple, tuple] = {}
+    explored.update(wave["baseline_exploration"])
 
     def parent_params(node, cohort, max_iter):
-        key = (node, id(cohort[0]), id(cohort[1]), max_iter)
+        equation = references[node].text if node in references else BASE
+        key = (node, equation, id(cohort[0]), id(cohort[1]), max_iter)
         if key not in fitted_parents:
             run = baseline_fit.solve if node == BASELINE_ID else solver(references[node], lineage[node])
             fitted_parents[key] = (cohort, run(cohort, max_iter)[3])
@@ -208,10 +237,13 @@ async def execute(
 
         return fit
 
-    @cache
     def reference_fit(node):
         if node == BASELINE_ID:
             return baseline_fit
+        return _reference_fit(node, references[node].text)
+
+    @cache
+    def _reference_fit(node, _equation):
         candidate = references[node]
         return ParentFit(node, candidate.model, candidate.estimator, solver(candidate, tuple(lineage[node])))
 
@@ -250,9 +282,7 @@ async def execute(
             result = measure_node(candidate, explore, parents)
             record.update(status="fitted", metrics=result)
             depth[idea.branch] += 1
-            if node not in references:
-                references[node], metrics[node] = candidate, result
-                lineage[node] = parents
+            adopt(node, candidate, result, parents)
         except (ValueError, KeyError, TypeError, FloatingPointError, OverflowError) as exc:
             record.update(status="fit_failed", error=str(exc))
             return (
@@ -475,6 +505,8 @@ def _run(args, output):
         validate_graph(ideas)
     if not 0 <= args.new_probability <= 1:
         raise SystemExit("--new-probability must be between zero and one.")
+    if args.temperature is not None and not args.temperature > 0:
+        raise SystemExit("--temperature must be positive.")
     entry = fetch_models(load_key()).get(MODEL)
     if not entry or not is_free(entry) or "image/png" not in entry["modalities"]["input"]:
         raise SystemExit(f"{MODEL} is not confirmed free with PNG support.")
@@ -494,6 +526,7 @@ def _run(args, output):
         "k": args.k,
         "starts": args.starts,
         "patience": args.patience,
+        "temperature": args.temperature,
         "waves": args.waves,
         "finalize": args.finalize,
         "idea_source": "generated" if ideas is None else "catalog",
@@ -528,6 +561,7 @@ def _run(args, output):
                 new_probability=args.new_probability,
                 starts=args.starts,
                 patience=args.patience,
+                temperature=args.temperature,
                 resume=args.resume,
             )
         finally:

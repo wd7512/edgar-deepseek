@@ -1,4 +1,8 @@
-"""Ideas, the prerequisite graph and score-blind route draws."""
+"""Ideas, the prerequisite graph and route draws.
+
+Draws are score-blind by default. With a `Guide`, the scheduler (never the model) weights parents and
+revisits by their exploration scores, so the search climbs while every eligible parent stays possible.
+"""
 
 import math
 import re
@@ -12,6 +16,26 @@ from edgar_study.frontier.replies import InvalidReply
 from edgar_study.frontier.seed import BASELINE_ID
 
 LANES = {"frontier": 0.6, "detour": 0.3, "root": 0.1}
+BLIND_MODES = {"single_idea": 0.6, "anomaly_detour": 0.2, "independent_root": 0.1, "combination": 0.1}
+GUIDED_MODES = {"single_idea": 0.5, "anomaly_detour": 0.15, "independent_root": 0.05, "combination": 0.3}
+UNFITTED = 0.05
+
+
+@dataclass(frozen=True)
+class Guide:
+    """Exploration scores (lower is better) and a temperature in score units for weighting draws."""
+
+    scores: dict
+    temperature: float
+
+    def weights(self, names):
+        """exp(-(score - lowest) / temperature) per name; names without a score get a small weight."""
+        known = [self.scores[n] for n in names if n in self.scores]
+        lowest = min(known) if known else 0.0
+        return {
+            n: math.exp(-(self.scores[n] - lowest) / self.temperature) if n in self.scores else UNFITTED
+            for n in names
+        }
 
 
 @dataclass(frozen=True)
@@ -109,16 +133,17 @@ def draw(ideas, references, attempts, rng, depth=None):
     }
 
 
-def draw_generated(nodes, references, history, rng, new_probability, step):
-    """Draw a new route or revisit using proposal validity, never fit quality."""
+def draw_generated(nodes, references, history, rng, new_probability, step, guide=None):
+    """Draw a new route or revisit. Without a guide only proposal validity counts, never fit quality."""
     types = {"new": new_probability, "revisit": 1 - new_probability} if nodes else {"new": 1}
     kind, kind_p = _pick({key: value for key, value in types.items() if value}, rng)
     choice: dict[str, Any] = {"kind": kind, "kind_probabilities": kind_p}
     if kind == "revisit":
         weights = {}
+        fit = guide.weights(list(nodes)) if guide else {}
         for node in nodes:
             recent = history.get(node, [])[-16:]
-            weights[node] = 1 - 0.85 * sum(recent) / max(1, len(recent))
+            weights[node] = (1 - 0.85 * sum(recent) / max(1, len(recent))) * fit.get(node, 1.0)
         node, node_p = _pick(weights, rng)
         routes = [
             route
@@ -136,15 +161,25 @@ def draw_generated(nodes, references, history, rng, new_probability, step):
             "route_probability": 1 / len(routes),
         }
     pool = [BASELINE_ID, *references]
-    weights = {"single_idea": 0.6, "anomaly_detour": 0.2, "independent_root": 0.1}
-    if len(references) >= 2:
-        weights["combination"] = 0.1
+    weights = dict(GUIDED_MODES if guide else BLIND_MODES)
+    if len(references) < 2:
+        del weights["combination"]
     mode, mode_p = _pick(weights, rng)
     if mode == "combination":
         pool = list(references)
     count = {"independent_root": 0, "combination": 2}.get(mode, 1)
-    parents = sorted(rng.choice(pool, count, replace=False).tolist())
+    extra = {}
+    if guide and count:
+        fit = guide.weights(pool)
+        total = sum(fit.values())
+        extra["parent_probabilities"] = {name: fit[name] / total for name in pool}
+        parents = sorted(
+            rng.choice(pool, count, replace=False, p=list(extra["parent_probabilities"].values())).tolist()
+        )
+    else:
+        parents = sorted(rng.choice(pool, count, replace=False).tolist())
     return {
+        **extra,
         **choice,
         "node": f"idea-{step + 1}",
         "mode": mode,
