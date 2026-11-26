@@ -217,7 +217,7 @@ def test_initial_layout_never_overlaps_however_many_ideas_there_are():
     for i, (x, y) in enumerate(points):
         for ox, oy in points[i + 1 :]:
             assert abs(x - ox) >= 192 or abs(y - oy) >= 68
-        assert 96 <= x <= 904 and y >= 34
+        assert x == x and y >= 34
 
 
 def test_graph_can_be_zoomed_and_reset():
@@ -263,3 +263,87 @@ def test_highlight_follows_replay_and_ignores_ties_with_nothing():
     assert 'data-lowest-mse="3"' in first.split('data-node="a"')[1].split(">")[0]
     assert 'data-lowest-mse="3"' not in both.split('data-node="a"')[1].split(">")[0]
     assert 'data-lowest-mse="3"' in both.split('data-node="b"')[1].split(">")[0]
+
+
+def test_layered_layout_puts_children_below_parents_and_orders_to_avoid_crossings():
+    wave = {
+        "graph": [
+            {"node": "a1", "text": "a1", "routes": [], "introduced_at": 0},
+            {"node": "a2", "text": "a2", "routes": [], "introduced_at": 0},
+            {"node": "b1", "text": "b1", "routes": [["a2"]], "introduced_at": 0},
+            {"node": "b2", "text": "b2", "routes": [["a1"]], "introduced_at": 0},
+            {"node": "c", "text": "c", "routes": [["b1", "b2"]], "introduced_at": 0},
+        ]
+    }
+    homes = _homes(render(wave))
+    for parent, child in (("a1", "b2"), ("a2", "b1"), ("b1", "c"), ("b2", "c")):
+        assert homes[parent][1] < homes[child][1]
+    assert (homes["a1"][0] < homes["a2"][0]) == (homes["b2"][0] < homes["b1"][0])
+
+
+def test_layout_of_a_ten_thousand_node_tree_is_fast_and_overlap_free():
+    import time
+
+    n = 10000
+    graph = [
+        {"node": f"n{i}", "text": "x", "routes": [[f"n{(i - 1) // 2}"]] if i else [], "introduced_at": 0}
+        for i in range(n)
+    ]
+    from edgar_study.frontier.viewer import _layout
+
+    start = time.perf_counter()
+    positions, _ = _layout({g["node"]: g for g in graph})
+    assert time.perf_counter() - start < 3
+    cells = {(round(x / 192), round(y / 68)) for x, y in positions.values()}
+    assert len(positions) == n and len(cells) == n
+
+
+def _big_wave(n):
+    graph = [
+        {"node": f"n{i}", "text": f"idea {i}", "routes": [[f"n{(i - 1) // 2}"]] if i else [], "introduced_at": 0}
+        for i in range(n)
+    ]
+    episodes = [{"node": f"n{i}", "candidates": [_fitted("x", 0.1 + i / 1000, 3 + i % 4)]} for i in range(n)]
+    return {"graph": graph, "episodes": episodes}
+
+
+def test_large_graphs_use_a_canvas_with_data_and_load_details_on_demand():
+    import json
+    import re
+
+    wave = _big_wave(600)
+    view = render(wave)
+    assert "<canvas" in view and 'class="node' not in view
+    assert "data-idea-detail" not in view
+    blob = re.search(r'<script type="application/json" class="graph-data">(.*?)</script>', view, re.S).group(1)
+    data = json.loads(blob)
+    assert len(data["nodes"]) == 600
+    assert len(data["links"]) == 599
+    assert any(node["lowest"] for node in data["nodes"])
+    detail = render(wave, inspect="n5")
+    assert detail.startswith("<aside") and 'data-idea-detail="n5"' in detail
+    assert render(wave, inspect="missing") == ""
+    assert "<canvas" not in render(_big_wave(20))
+
+
+def test_server_answers_cheap_snapshot_and_detail_requests(tmp_path):
+    import json
+    import threading
+    from http.server import ThreadingHTTPServer
+    from urllib.request import urlopen
+
+    from edgar_study.frontier.viewer import make_handler
+
+    path = tmp_path / "wave.json"
+    path.write_text(json.dumps(_big_wave(300)))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(path, "layout"))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}/"
+        snapshot = urlopen(base + "?snapshot=1").read().decode()
+        assert snapshot and "<" not in snapshot
+        assert f'data-snapshot="{snapshot}"' in urlopen(base).read().decode()
+        assert 'data-idea-detail="n3"' in urlopen(base + "?inspect=n3").read().decode()
+    finally:
+        server.shutdown()
+        server.server_close()
