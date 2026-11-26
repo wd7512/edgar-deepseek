@@ -46,3 +46,65 @@ def test_the_tool_note_explains_checking_and_how_many_follow_up_turns_there_are(
 
 def test_with_no_patience_there_is_no_tool_note():
     assert tool_note(0) == ""
+
+
+from edgar_study.frontier import grammar  # noqa: E402
+from edgar_study.frontier.prompts import EXAMPLE, PROMPTS, generated_prompt_v2  # noqa: E402
+
+SCALE = {"baseline": 0.4, "peak": 12.0}
+
+
+def _v2_prompts():
+    node = Idea(
+        "idea-1", "single_idea", "width", "Split the widths.", (("double_gaussian",),), "frontier", "W"
+    )
+    new = generated_prompt_v2(
+        {"node": "idea-2", "kind": "new", "mode": "single_idea", "parents": ["double_gaussian"]},
+        {},
+        {},
+        4,
+        scale=SCALE,
+    )
+    revisit = generated_prompt_v2(
+        {"node": "idea-1", "kind": "revisit", "mode": "revisit", "parents": ["double_gaussian"]},
+        {"idea-1": node},
+        {},
+        4,
+        (("b + a*cos(theta)", "fitted"), ("b + a/(s - c)", "fit_failed")),
+        scale=SCALE,
+    )
+    return new, revisit
+
+
+def test_the_new_prompt_states_the_limits_the_grammar_enforces():
+    for prompt in _v2_prompts():
+        assert f"at most {grammar.MAX_PARAMETERS} parameters" in prompt
+        assert f"{grammar.MAX_CHARACTERS} characters" in prompt
+        assert f"between -{grammar.NUMBER_LIMIT} and {grammar.NUMBER_LIMIT}" in prompt
+
+
+def test_the_new_prompt_explains_the_data_and_the_cost_of_parameters_without_any_score():
+    for prompt in _v2_prompts():
+        assert "fitted separately to each" in prompt and "every parameter has a cost" in prompt
+        assert "0.4" in prompt and "12" in prompt
+        assert all(word not in prompt.lower() for word in SCORE_WORDS)
+
+
+def test_the_new_prompt_gives_stability_rules_and_an_image_checklist():
+    for prompt in _v2_prompts():
+        assert "cross zero" in prompt and "tanh" in prompt
+        assert "anti-preferred" in prompt and "population" in prompt
+
+
+def test_the_new_revisit_prompt_says_which_tried_equations_could_not_be_fitted():
+    _, revisit = _v2_prompts()
+    assert "b + a*cos(theta) (fitted)" in revisit
+    assert "b + a/(s - c) (could not be fitted)" in revisit
+
+
+def test_the_example_equation_object_is_valid():
+    assert grammar.compile_equation(EXAMPLE).initial
+
+
+def test_both_variants_are_registered():
+    assert set(PROMPTS) == {"v1", "v2"}
