@@ -60,6 +60,10 @@ SYMBOLS = {
     ast.BitOr: "|",
     ast.BitXor: "^",
 }
+MAX_PARAMETERS = 12
+MAX_CHARACTERS = 600
+MAX_NODES = 260
+NUMBER_LIMIT = 100
 ALLOWED = "Use + - * / **, sin, cos, exp, tanh, abs, sqrt, wrap and one comparison with <, <=, > or >=."
 
 
@@ -96,10 +100,10 @@ def compile_equation(proposal):
         raise InvalidEquation(
             "invalid_equation_object", "Expected an equation string and a parameter object."
         )
-    if len(text) > 600:
-        raise InvalidEquation("equation_too_complex", "Equation exceeds 600 characters.")
-    if not 1 <= len(initial) <= 12:
-        raise InvalidEquation("invalid_parameter_count", "Expected one to twelve free parameters.")
+    if len(text) > MAX_CHARACTERS:
+        raise InvalidEquation("equation_too_complex", f"Equation exceeds {MAX_CHARACTERS} characters.")
+    if not 1 <= len(initial) <= MAX_PARAMETERS:
+        raise InvalidEquation("invalid_parameter_count", f"Expected 1 to {MAX_PARAMETERS} free parameters.")
     for name, value in initial.items():
         if (
             not isinstance(name, str)
@@ -107,7 +111,7 @@ def compile_equation(proposal):
             or not name.isascii()
             or name in {"pi", "theta", *FUNCTIONS}
             or type(value) not in (float, int)
-            or not -100 <= value <= 100
+            or not -NUMBER_LIMIT <= value <= NUMBER_LIMIT
         ):
             raise InvalidEquation("invalid_parameter", "Invalid parameter name or initial value.")
     try:
@@ -116,12 +120,16 @@ def compile_equation(proposal):
         raise InvalidEquation("invalid_syntax", "Equation is not a valid expression.") from exc
     except RecursionError as exc:
         raise InvalidEquation("equation_too_complex", "Equation is nested too deeply.") from exc
-    if sum(1 for _ in ast.walk(expr)) > 260:
+    if sum(1 for _ in ast.walk(expr)) > MAX_NODES:
         raise InvalidEquation("equation_too_complex", "Equation exceeds the expression complexity limit.")
     used = set()
 
     def build(node):
-        if isinstance(node, ast.Constant) and type(node.value) in (float, int) and -100 <= node.value <= 100:
+        if (
+            isinstance(node, ast.Constant)
+            and type(node.value) in (float, int)
+            and -NUMBER_LIMIT <= node.value <= NUMBER_LIMIT
+        ):
             return ("number", float(node.value))
         if isinstance(node, ast.Name):
             if node.id not in {"pi", "theta", *initial}:

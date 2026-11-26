@@ -4,6 +4,7 @@ from functools import partial
 from io import BytesIO
 from types import SimpleNamespace
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from PIL import Image
@@ -71,3 +72,47 @@ def test_a_batch_is_counted_without_drawing_and_each_panel_draws_the_same_bytes_
 
     assert batch.count == 20
     assert batch.panels[1]() == again.panels[1]()
+
+
+def _double_gaussian(theta, b, a1, a2, m, s):
+    wrap = jnp.arctan2(jnp.sin(theta - m), jnp.cos(theta - m))
+    back = jnp.arctan2(jnp.sin(theta - m - jnp.pi), jnp.cos(theta - m - jnp.pi))
+    return b + a1 * jnp.exp(-0.5 * (wrap / s) ** 2) + a2 * jnp.exp(-0.5 * (back / s) ** 2)
+
+
+def _population(extra):
+    from edgar_study.frontier.images import population_residuals
+
+    rng = np.random.default_rng(0)
+    angles = rng.uniform(0, 2 * np.pi, (40, 720)).astype(np.float32)
+    params = np.stack(
+        [
+            rng.uniform(0.2, 1, 40),
+            rng.uniform(2, 5, 40),
+            rng.uniform(0.5, 1, 40),
+            rng.uniform(0, 6, 40),
+            np.full(40, 0.4),
+        ],
+        axis=1,
+    ).astype(np.float32)
+    curve = np.asarray(jax.vmap(_double_gaussian)(jnp.asarray(angles), *params.T))
+    aligned = np.arctan2(np.sin(angles - params[:, 3:4]), np.cos(angles - params[:, 3:4]))
+    responses = curve + extra(aligned) * params[:, 1:2]
+    return population_residuals(_double_gaussian, params, angles, responses)
+
+
+def test_a_perfect_fit_has_a_flat_population_residual():
+    centres, mean, _ = _population(lambda aligned: 0 * aligned)
+    assert len(centres) == 36 and np.max(np.abs(mean)) < 1e-4
+
+
+def test_a_misfit_shared_by_every_neuron_shows_up_aligned_to_the_preferred_angle():
+    centres, mean, _ = _population(lambda aligned: 0.2 * np.cos(aligned))
+    np.testing.assert_allclose(mean, 0.2 * np.cos(np.deg2rad(centres)), atol=0.03)
+
+
+def test_the_population_panel_is_a_png():
+    from edgar_study.frontier.images import population_panel
+
+    png = population_panel("double_gaussian", *_population(lambda aligned: 0 * aligned))
+    assert Image.open(BytesIO(png)).format == "PNG"

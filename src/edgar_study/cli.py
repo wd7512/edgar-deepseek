@@ -256,6 +256,19 @@ def main():
     fitbench.add_argument("--output", type=Path, default=Path("results/fitbench"))
     fitbench.set_defaults(func=lambda args: _load("frontier.bench", "run")(args))
 
+    ab = commands.add_parser(
+        "prompt-ab", parents=[dataset, upstream], help="A/B test proposal prompts on fixed contexts."
+    )
+    ab.add_argument("--wave", type=Path, required=True, help="A finished run's wave.json for contexts.")
+    ab.add_argument("--output", type=Path, required=True)
+    ab.add_argument("--arms", default="v1,v2", help="Comma-separated prompt variants.")
+    ab.add_argument("--samples", type=int, default=3, help="Replies per arm and context.")
+    ab.add_argument("--cells", type=int, default=128, help="Exploration neurons each equation is fitted on.")
+    ab.add_argument("--k", type=int, default=4)
+    ab.add_argument("--seed", type=int, default=0)
+    ab.add_argument("--max-iter", type=int, default=2000)
+    ab.set_defaults(func=lambda args: _load("frontier.ab", "run")(args))
+
     viewer = commands.add_parser("frontier-view", help="Serve a live frontier graph and batch replay.")
     viewer.add_argument("--run", type=Path, required=True, help="Run directory or wave.json.")
     viewer.add_argument("--port", type=int, default=8765)
