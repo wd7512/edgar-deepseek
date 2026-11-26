@@ -87,8 +87,9 @@ def contexts(wave):
         top = ranked[0]
         found.append({"choice": new("single_idea", [top])})
         route = list(ideas[top].routes[0]) if ideas[top].routes else []
-        revisit = {"node": top, "kind": "revisit", "mode": "revisit", "parents": route}
-        found.append({"choice": revisit, "tried": tried.get(top, [])[-8:]})
+        if all(name == BASELINE_ID or name in references for name in route):
+            revisit = {"node": top, "kind": "revisit", "mode": "revisit", "parents": route}
+            found.append({"choice": revisit, "tried": tried.get(top, [])[-8:]})
     if len(ranked) > 1:
         found.append({"choice": new("combination", sorted(ranked[:2]))})
     for context in found:
@@ -186,10 +187,10 @@ def run(args):
     if unknown or len(arms) < 2:
         raise SystemExit(f"Choose at least two arms from {sorted(PROMPTS)}.")
     output = Path(args.output)
-    output.mkdir(parents=True, exist_ok=False)
     entry = fetch_models(load_key()).get(MODEL)
     if not entry or not is_free(entry):
         raise SystemExit(f"{MODEL} is not confirmed free.")
+    output.mkdir(parents=True, exist_ok=False)
     wave = json.loads(Path(args.wave).read_text())
     found = contexts(wave)
     up = import_upstream(args.upstream.resolve())

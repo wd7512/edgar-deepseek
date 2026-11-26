@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from edgar_study.frontier.ab import contexts, summarise
+from edgar_study.frontier.ab import _equations, _report, contexts, summarise
+from edgar_study.frontier.replies import InvalidReply
 
 
 def _wave():
@@ -65,3 +66,32 @@ def test_the_summary_counts_outcomes_per_arm_and_pairs_gains_by_context():
     assert summary["v2"]["best_gain"] == pytest.approx(0.2)
     assert summary["paired"]["contexts"] == 2
     assert summary["paired"]["v2_better"] == 2
+
+
+def test_a_revisit_whose_route_has_no_fitted_equation_is_left_out_instead_of_crashing():
+    wave = _wave()
+    wave["idea_catalog"][0]["routes"] = [["idea-0"]]
+    found = contexts(wave)
+    assert not any(c["choice"]["kind"] == "revisit" for c in found)
+    assert any(c["choice"]["parents"] == ["idea-1"] for c in found)
+
+
+def test_equations_come_from_a_list_or_from_the_equations_of_an_object():
+    one = {"equation": "b", "initial": {"b": 1.0}}
+    assert _equations(json.dumps([one, one, one]), "revisit", 2) == [one, one]
+    assert _equations(json.dumps({"idea": {}, "equations": [one]}), "new", 4) == [one]
+    with pytest.raises(InvalidReply):
+        _equations(json.dumps([one]), "new", 4)
+    with pytest.raises(InvalidReply):
+        _equations(json.dumps({"a": 1}), "revisit", 4)
+
+
+def test_the_report_has_a_row_per_measure_and_a_paired_line():
+    rows = [
+        {"arm": "v1", "context": 0, "status": "fitted", "gain": 0.1},
+        {"arm": "v2", "context": 0, "status": "invalid", "gain": None},
+    ]
+    report = _report(summarise(rows))
+    assert "| best_gain | +0.100 | – |" in report
+    assert "| invalid | 0% | 100% |" in report
+    assert "Paired by context (1): v1 better in 1, v2 better in 0, ties 0." in report

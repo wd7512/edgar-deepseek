@@ -103,7 +103,7 @@ def compile_equation(proposal):
     if len(text) > MAX_CHARACTERS:
         raise InvalidEquation("equation_too_complex", f"Equation exceeds {MAX_CHARACTERS} characters.")
     if not 1 <= len(initial) <= MAX_PARAMETERS:
-        raise InvalidEquation("invalid_parameter_count", "Expected one to twelve free parameters.")
+        raise InvalidEquation("invalid_parameter_count", f"Expected 1 to {MAX_PARAMETERS} free parameters.")
     for name, value in initial.items():
         if (
             not isinstance(name, str)

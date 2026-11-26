@@ -194,7 +194,7 @@ def _rules(k):
 
 _IMAGES = (
     "## Images\n"
-    "For each parent: one population image, the parent's residual (observed minus fitted) averaged over all "
+    "For each parent: one population image, the parent's residual (observed minus fitted) averaged over many "
     "exploration neurons with each neuron's preferred direction at 0 degrees; then 10 neurons, each with its "
     "held-out trials and fit, then its residuals by angle. Look for patterns shared across neurons, mostly in "
     "the population image: peak sharpness, width, skew, preferred and anti-preferred amplitude, the baseline "

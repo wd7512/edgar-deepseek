@@ -1,5 +1,13 @@
+from edgar_study.frontier import grammar
 from edgar_study.frontier.ideas import Idea
-from edgar_study.frontier.prompts import generated_prompt, idea_prompt, tool_note
+from edgar_study.frontier.prompts import (
+    EXAMPLE,
+    PROMPTS,
+    generated_prompt,
+    generated_prompt_v2,
+    idea_prompt,
+    tool_note,
+)
 
 
 def test_revisit_prompt_lists_tried_equations_without_scores():
@@ -47,9 +55,6 @@ def test_the_tool_note_explains_checking_and_how_many_follow_up_turns_there_are(
 def test_with_no_patience_there_is_no_tool_note():
     assert tool_note(0) == ""
 
-
-from edgar_study.frontier import grammar  # noqa: E402
-from edgar_study.frontier.prompts import EXAMPLE, PROMPTS, generated_prompt_v2  # noqa: E402
 
 SCALE = {"baseline": 0.4, "peak": 12.0}
 
@@ -108,3 +113,8 @@ def test_the_example_equation_object_is_valid():
 
 def test_both_variants_are_registered():
     assert set(PROMPTS) == {"v1", "v2"}
+
+
+def test_the_image_checklist_does_not_claim_every_neuron_is_averaged():
+    for prompt in _v2_prompts():
+        assert "averaged over all" not in prompt

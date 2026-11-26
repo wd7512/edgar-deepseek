@@ -12,3 +12,5 @@ The `v2` prompt:
 Each parent now also gets a population residual image: residuals averaged over neurons, aligned to each neuron's preferred direction.
 
 `prompt-ab` takes contexts from a finished run, samples every arm on the same contexts and the same neurons, and fits each equation on a subset of exploration neurons against its parent. It reports outcome rates and paired gains.
+
+A revisit context is skipped when its parent route includes an idea with no fitted equation, instead of crashing. The output directory is created only after the free-model check.
