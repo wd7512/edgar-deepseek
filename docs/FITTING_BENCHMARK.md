@@ -48,6 +48,28 @@ With the absolute cap of 0.25, an amplitude could move only about 25 in 100 iter
 
 Under the absolute cap, `warm` had six violations. Two come from W6 being fitted before its equivalent W6b. The other four come from GG7 fitting a negative width. GG7 uses `abs(x/s)`, which ignores the sign, but L8's `(abs(x)/s1)**p` is undefined for a negative `s1`. The map is exact only for positive widths, so those four are the map's fault, not the fitter's.
 
+## Fitting speed
+
+Bounded LM runs in chunks of 10 iterations and drops fits that have stopped between chunks, so fits still moving no longer pay for finished ones. Results are identical: the largest parameter difference is 0. One equation on the 791 exploration neurons with 5 starts:
+
+| Equation | Single loop | Chunks of 10 |
+| --- | ---: | ---: |
+| G5 (5 parameters) | 31.1 s | 12.8 s |
+| SK9 (9 parameters) | 52.1 s | 22.4 s |
+| L8 (8 parameters) | 39.2 s | 15.6 s |
+
+Pruning (`prune_after`) is available but off by default. It runs every start for a few iterations, then continues only each neuron's leader. It halves the time again, but costs accuracy, mainly on cold fits and the larger equations:
+
+| Fitter (64 cells) | Seconds | Violations | Mean regret |
+| --- | ---: | ---: | ---: |
+| `warm` | 59.5 | 2 | 0.21% |
+| `pruned-20-warm` | 32.8 | 2 | 0.50% |
+| `pruned-10-warm` | 24.9 | 4 | 0.74% |
+| `protocol` | 60.8 | 189 | 2.23% |
+| `pruned-20` | 30.3 | 202 | 2.66% |
+
+The paper's model beats the double Gaussian by only about 0.5% in MSE, so the frontier keeps the unpruned protocol.
+
 ## Adding a fitter
 
 Add a `Fitter` to `FITTERS` in `src/edgar_study/frontier/bench.py`. Its `fit(equation, xt, yt, warm)` returns one row of parameters per cell, in the equation's declared order. `warm` is `None` unless the fitter asks for warm starts. Any optimiser works (LM, Adam, scipy), as long as it uses only `xt` and `yt`.

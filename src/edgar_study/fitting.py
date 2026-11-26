@@ -258,6 +258,68 @@ def fit_lm(model, params, x, y, iterations=LM_ITERATIONS):
     return jax.device_get(run(params))[:n_cells]
 
 
+LM_CHUNK = 10
+
+
+def _bucket(count, total):
+    """The padded batch size for `count` active fits: a power of two, at most `total`."""
+    return min(total, 1 << max(3, (count - 1).bit_length()))
+
+
+def _bounded_runner(model, max_step, tolerance, relative_step):
+    """A compiled chunk of bounded LM: it runs up to `budget` iterations on the fits it is given."""
+
+    def residual(p, xc, yc):
+        return model(xc, *p) - yc
+
+    residuals = jax.vmap(residual)
+    jacobians = jax.vmap(jax.jacfwd(residual))
+
+    def cost(p, x, y):
+        r = residuals(p, x, y)
+        c = jnp.sum(r * r, axis=1)
+        return jnp.where(jnp.isfinite(c), c, jnp.inf)
+
+    def lm_step(p, damping, x, y):
+        r, J = residuals(p, x, y), jacobians(p, x, y)
+        gradient = jnp.einsum("ctk,ct->ck", J, r)
+        hessian = jnp.einsum("ctk,ctl->ckl", J, J)
+        diagonal = jnp.diagonal(hessian, axis1=1, axis2=2)
+        scale = jnp.maximum(diagonal, 1e-9 * jnp.max(diagonal, axis=1, keepdims=True) + 1e-12)
+        damped = hessian + jax.vmap(jnp.diag)(damping[:, None] * scale)
+        s = jnp.linalg.solve(damped, -gradient[..., None])[..., 0]
+        return jnp.where(jnp.isfinite(s), s, 0.0)
+
+    @jax.jit
+    def run(p, damping, c, done, x, y, budget):
+        def cond(state):
+            i, _, _, _, done = state
+            return (i < budget) & ~jnp.all(done)
+
+        def body(state):
+            i, p, damping, c, done = state
+            step = lm_step(p, damping, x, y)
+            limit = max_step * (1 + jnp.abs(p)) if relative_step else max_step
+            biggest = jnp.max(jnp.abs(step) / limit, axis=1, keepdims=True)
+            capped = biggest[:, 0] > 1
+            candidate = p + step * jnp.minimum(1.0, 1 / jnp.maximum(biggest, 1e-30))
+            new_cost = cost(candidate, x, y)
+            accept = ~done & (new_cost < c)
+            converged = (accept & (c - new_cost <= tolerance * c)) | (damping >= MAX_DAMPING)
+            return (
+                i + 1,
+                jnp.where(accept[:, None], candidate, p),
+                jnp.where(done, damping, _update_damping(damping, accept, capped)),
+                jnp.where(accept, new_cost, c),
+                done | converged,
+            )
+
+        i, p, damping, c, done = jax.lax.while_loop(cond, body, (0, p, damping, c, done))
+        return p, damping, c, done, i
+
+    return run, jax.jit(cost)
+
+
 def fit_lm_bounded(
     model,
     params,
@@ -267,52 +329,41 @@ def fit_lm_bounded(
     tolerance=LM_BOUNDED_TOLERANCE,
     max_iterations=LM_ITERATIONS,
     relative_step=False,
+    chunk=LM_CHUNK,
 ):
     """Levenberg–Marquardt with each parameter's move capped at `max_step` per iteration.
 
     With `relative_step`, the cap is `max_step * (1 + |parameter|)`, so large parameters can travel far
     while parameters near zero keep the same cap.
 
-    A cell stops once an accepted step lowers its squared error by less than `tolerance` of the
-    current error, or once its damping saturates; the loop ends when every cell has stopped or after
-    `max_iterations`. Returns the fitted parameters, the iterations run and how many cells stopped
-    (by tolerance or saturated damping) before the iteration cap.
+    A fit stops once an accepted step lowers its squared error by less than `tolerance` of the current
+    error, or once its damping saturates; the loop ends when every fit has stopped or after
+    `max_iterations`. It runs in chunks of `chunk` iterations and drops stopped fits between chunks, so
+    the fits still moving do not pay for the finished ones; each fit follows the same path either way.
+    Returns the fitted parameters, the iterations run and how many fits stopped before the cap.
     """
     if max_iterations < 1:
         return BoundedFit(np.asarray(params), 0, 0)
-    (params, x, y), _, n_cells = _shard(params, x, y)
-    cost, lm_step = _least_squares(model, x, y)
-
-    def cond(state):
-        i, _, _, _, done = state
-        return (i < max_iterations) & ~jnp.all(done)
-
-    def body(state):
-        i, p, damping, c, done = state
-        step = lm_step(p, damping)
-        limit = max_step * (1 + jnp.abs(p)) if relative_step else max_step
-        biggest = jnp.max(jnp.abs(step) / limit, axis=1, keepdims=True)
-        capped = biggest[:, 0] > 1
-        candidate = p + step * jnp.minimum(1.0, 1 / jnp.maximum(biggest, 1e-30))
-        new_cost = cost(candidate)
-        accept = ~done & (new_cost < c)
-        converged = (accept & (c - new_cost <= tolerance * c)) | (damping >= MAX_DAMPING)
-        return (
-            i + 1,
-            jnp.where(accept[:, None], candidate, p),
-            jnp.where(done, damping, _update_damping(damping, accept, capped)),
-            jnp.where(accept, new_cost, c),
-            done | converged,
-        )
-
-    @jax.jit
-    def run(p):
-        start = (0, p, jnp.full(p.shape[0], 1e-3, p.dtype), cost(p), jnp.zeros(p.shape[0], bool))
-        i, p, _, _, done = jax.lax.while_loop(cond, body, start)
-        return p, i, done
-
-    fitted, iterations, done = jax.device_get(run(params))
-    return BoundedFit(fitted[:n_cells], int(iterations), int(np.sum(done[:n_cells])))
+    run, cost = _bounded_runner(model, max_step, tolerance, relative_step)
+    params, x, y = np.asarray(params), np.asarray(x), np.asarray(y)
+    total = len(params)
+    (sp, sx, sy), _, _ = _shard(params, x, y)
+    p = np.array(jax.device_get(sp))[:total]
+    c = np.array(jax.device_get(cost(sp, sx, sy)))[:total]
+    damping = np.full(total, 1e-3, p.dtype)
+    done = np.zeros(total, bool)
+    active, iterations = np.arange(total), 0
+    while iterations < max_iterations and active.size:
+        budget = max_iterations - iterations if chunk is None else min(chunk, max_iterations - iterations)
+        size = total if chunk is None else _bucket(active.size, total)
+        rows = np.concatenate([active, np.full(size - active.size, active[0])])
+        arrays, _, _ = _shard(p[rows], damping[rows], c[rows], done[rows], x[rows], y[rows])
+        out = jax.device_get(run(*arrays, budget))
+        for target, value in zip((p, damping, c, done), out[:4], strict=True):
+            target[active] = np.asarray(value)[: active.size]
+        iterations += int(out[4])
+        active = active[~done[active]]
+    return BoundedFit(p, iterations, int(np.sum(done)))
 
 
 def perturbed_starts(params, starts, seed=0, scale=MULTISTART_SCALE):
@@ -385,6 +436,33 @@ def fit_from_starts(
     best = np.argmin(costs, axis=0)
     cell = np.arange(cells)
     return MultiStartFit(fit.params.reshape(k, cells, n)[best, cell], best, costs[best, cell])
+
+
+def fit_pruned(
+    model,
+    candidates,
+    x,
+    y,
+    prune_after,
+    max_iterations=LM_ITERATIONS,
+    tolerance=LM_BOUNDED_TOLERANCE,
+    relative_step=False,
+):
+    """Fit every start for `prune_after` iterations, then continue only each cell's leading start.
+
+    Steps are accepted only when they lower a fit's error, so each cell ends no worse than its leader.
+    Losing starts stop early instead of running the whole budget.
+    """
+    options = {"tolerance": tolerance, "relative_step": relative_step}
+    early = fit_from_starts(
+        model, candidates, x, y, max_iterations=min(prune_after, max_iterations), **options
+    )
+    if prune_after >= max_iterations or len(candidates) == 1:
+        return early
+    late = fit_lm_bounded(model, early.params, x, y, max_iterations=max_iterations - prune_after, **options)
+    cost, _ = _least_squares(model, jnp.asarray(x), jnp.asarray(y))
+    costs = np.asarray(cost(jnp.asarray(late.params)))
+    return MultiStartFit(late.params, early.best_start, np.where(np.isfinite(costs), costs, np.inf))
 
 
 def benchmark_report(rows):

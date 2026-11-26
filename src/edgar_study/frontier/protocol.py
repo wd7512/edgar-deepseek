@@ -21,6 +21,7 @@ from edgar_study.upstream import MSE_SCALE, PENALTY
 STARTS = 5
 JITTER = fitting.MULTISTART_SCALE
 RELATIVE_STEP = True
+PRUNE_AFTER = None
 
 
 class Fit(NamedTuple):
@@ -63,7 +64,17 @@ def jittered_starts(start, xt, yt, starts, seed, scale):
 
 
 def fit_training(
-    model, estimator, xt, yt, max_iter, *, starts=STARTS, seed=0, warm=None, relative_step=RELATIVE_STEP
+    model,
+    estimator,
+    xt,
+    yt,
+    max_iter,
+    *,
+    starts=STARTS,
+    seed=0,
+    warm=None,
+    relative_step=RELATIVE_STEP,
+    prune_after=PRUNE_AFTER,
 ):
     """Fit `model` to training trials only and return each cell's parameters.
 
@@ -82,6 +93,10 @@ def fit_training(
         if warm.shape != start.shape:
             raise ValueError(f"Warm start has shape {warm.shape}, expected {start.shape}.")
         candidates[-1] = warm
+    if prune_after is not None:
+        return fitting.fit_pruned(
+            model, candidates, xt, yt, prune_after, max_iterations=max_iter, relative_step=relative_step
+        ).params
     return fitting.fit_from_starts(
         model, candidates, xt, yt, max_iterations=max_iter, relative_step=relative_step
     ).params

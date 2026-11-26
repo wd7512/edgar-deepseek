@@ -213,3 +213,40 @@ def test_with_no_iterations_allowed_the_starts_come_back_unchanged():
     fit = fitting.fit_lm_bounded(_cosine, start, theta, y, max_iterations=0)
     np.testing.assert_array_equal(fit.params, start)
     assert (fit.iterations, fit.stopped) == (0, 0)
+
+
+def test_pruning_keeps_each_cells_leading_start_and_never_ends_worse_than_it():
+    theta, y, start = _cosine_cells()
+    candidates = fitting.perturbed_starts(start, 6, seed=2)
+
+    leaders = fitting.fit_from_starts(_cosine, candidates, theta, y, max_iterations=3)
+    pruned = fitting.fit_pruned(_cosine, candidates, theta, y, prune_after=3, max_iterations=50)
+
+    assert np.all(_squared_error(pruned.params, theta, y) <= _squared_error(leaders.params, theta, y) + 1e-5)
+    np.testing.assert_array_equal(pruned.best_start, leaders.best_start)
+    assert np.all(_squared_error(pruned.params, theta, y) < 1e-3)
+
+
+def test_pruning_after_the_whole_budget_is_the_same_as_fitting_every_start():
+    theta, y, start = _cosine_cells()
+    candidates = fitting.perturbed_starts(start, 4, seed=3)
+
+    every = fitting.fit_from_starts(_cosine, candidates, theta, y, max_iterations=20)
+    pruned = fitting.fit_pruned(_cosine, candidates, theta, y, prune_after=20, max_iterations=20)
+
+    np.testing.assert_array_equal(pruned.params, every.params)
+
+
+@pytest.mark.parametrize("chunk", [1, 3, 7])
+def test_dropping_finished_fits_between_chunks_changes_no_fit(chunk):
+    winner = next(c for c in curves.CURVES if c.name == curves.WINNER)
+    x, y = curves.synthetic_cells(13, 120)
+    start = np.stack([winner.estimator(np.asarray(x[i]), np.asarray(y[i])) for i in range(13)])
+    start = np.concatenate([start, start * 1.3])
+    x, y = np.concatenate([x, x]), np.concatenate([y, y])
+
+    whole = fitting.fit_lm_bounded(winner.model, start, x, y, max_iterations=60, chunk=None)
+    chunked = fitting.fit_lm_bounded(winner.model, start, x, y, max_iterations=60, chunk=chunk)
+
+    np.testing.assert_allclose(chunked.params, whole.params, rtol=1e-5, atol=1e-6)
+    assert (chunked.iterations, chunked.stopped) == (whole.iterations, whole.stopped)
