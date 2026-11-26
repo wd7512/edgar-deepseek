@@ -73,3 +73,16 @@ The paper's model beats the double Gaussian by only about 0.5% in MSE, so the fr
 ## Adding a fitter
 
 Add a `Fitter` to `FITTERS` in `src/edgar_study/frontier/bench.py`. Its `fit(equation, xt, yt, warm)` returns one row of parameters per cell, in the equation's declared order. `warm` is `None` unless the fitter asks for warm starts. Any optimiser works (LM, Adam, scipy), as long as it uses only `xt` and `yt`.
+
+## Binning (rejected)
+
+The `binned-N` fitters fit to averages of N angle-sorted neighbouring training trials. Each point stands for the same number of trials, so no weights are needed. Errors are still measured on the raw trials.
+
+| Fitter (64 cells) | Seconds | Violations | Mean regret |
+| --- | ---: | ---: | ---: |
+| `warm` | 59.5 | 2 | 0.45% |
+| `binned-2-warm` | 53.9 | 13 | 347% |
+| `binned-4-warm` | 53.8 | 26 | 9660% |
+| `binned-8-warm` | 49.5 | 28 | 2.79% |
+
+At 64 cells, compilation dominates the time, so fewer points save little. Fewer points also leave room between them for spikes, and SKQ11, SKP10 and SK9 blow up when scored on the trials.
