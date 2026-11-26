@@ -29,7 +29,7 @@ from edgar_study.datasets import (
     prepare,
 )
 from edgar_study.frontier.grammar import Equation, compile_equation
-from edgar_study.frontier.protocol import STARTS, fit_equation_training, predict, split_trials
+from edgar_study.frontier.protocol import RELATIVE_STEP, STARTS, fit_equation_training, predict, split_trials
 from edgar_study.frontier.warm import Parent, declared_probes, verified_map
 from edgar_study.upstream import import_upstream
 
@@ -96,12 +96,12 @@ def load_fixture(path=FIXTURE) -> Fixture:
     return Fixture(equations, sources, tuple(edges))
 
 
-def protocol_fitter(starts=STARTS, max_iter=fitting.LM_ITERATIONS, relative_step=False):
+def protocol_fitter(starts=STARTS, max_iter=fitting.LM_ITERATIONS, relative_step=RELATIVE_STEP, **options):
     """The frontier's fitting protocol on training trials, with its budget as options."""
 
     def fit(equation, xt, yt, warm):
         return fit_equation_training(
-            equation, xt, yt, max_iter, starts=starts, warm=warm, relative_step=relative_step
+            equation, xt, yt, max_iter, starts=starts, warm=warm, relative_step=relative_step, **options
         )
 
     return fit
@@ -111,6 +111,13 @@ FITTERS = {
     "protocol": Fitter(protocol_fitter()),
     "warm": Fitter(protocol_fitter(), warm=True),
     "single": Fitter(protocol_fitter(starts=1)),
+    **{
+        f"pruned-{n}{suffix}": Fitter(protocol_fitter(prune_after=n), warm=bool(suffix))
+        for n in (5, 10, 20)
+        for suffix in ("", "-warm")
+    },
+    "absolute": Fitter(protocol_fitter(relative_step=False)),
+    "absolute-warm": Fitter(protocol_fitter(relative_step=False), warm=True),
     "reference": Fitter(protocol_fitter(starts=32, max_iter=400, relative_step=True), warm=True),
 }
 

@@ -14,11 +14,20 @@ import numpy as np
 
 from edgar_study import fitting
 from edgar_study.datasets import DISCOVERY_PARTITION_SEED, discovery_partition, load_dataset, prepare
+from edgar_study.frontier.agent import FRESH, PATIENCE, check_proposal, check_report, converse
 from edgar_study.frontier.fits import double_gaussian_parent, measure
 from edgar_study.frontier.grammar import InvalidEquation, compile_equation
-from edgar_study.frontier.ideas import Idea, draw, draw_generated, generated_idea, route_mode, validate_graph
+from edgar_study.frontier.ideas import (
+    Guide,
+    Idea,
+    draw,
+    draw_generated,
+    generated_idea,
+    route_mode,
+    validate_graph,
+)
 from edgar_study.frontier.images import ParentFit, prepare_images
-from edgar_study.frontier.prompts import generated_prompt, idea_prompt
+from edgar_study.frontier.prompts import generated_prompt, idea_prompt, tool_note
 from edgar_study.frontier.protocol import STARTS, solve
 from edgar_study.frontier.replies import InvalidReply, decode, decode_json, equation_list
 from edgar_study.frontier.seed import BASE, BASE_NAMES, BASE_PROBES, BASELINE_ID, baseline_node
@@ -53,8 +62,17 @@ async def execute(
     resume=False,
     new_probability=0.8,
     starts=STARTS,
+    patience=PATIENCE,
+    temperature=None,
 ):
-    """Explore rolling waves, then confirm a frozen shortlist; optionally select and test once."""
+    """Explore rolling waves, then confirm a frozen shortlist; optionally select and test once.
+
+    Each batch is a conversation: the model may check equations before answering, and every equation
+    that cannot be used is reported back for replacement, for up to `patience` follow-up turns.
+
+    With a `temperature` (in score units), the scheduler weights parents and revisits by exploration
+    score and each idea's reference becomes its best-scoring equation. The model never sees a score.
+    """
     discovery = ideas is None
     ideas = () if discovery else ideas
     validate_graph(ideas)
@@ -62,6 +80,10 @@ async def execute(
         raise ValueError("New-idea probability must be between zero and one.")
     if min(batches, k, waves, starts) < 1:
         raise ValueError("Wave count, batch count, equations per batch and starts must be positive.")
+    if patience < 0:
+        raise ValueError("Patience must be zero or more follow-up turns.")
+    if temperature is not None and not temperature > 0:
+        raise ValueError("Temperature must be positive.")
     output.mkdir(parents=True, exist_ok=True)
     path = output / "wave.json"
     if path.exists() and not resume:
@@ -74,9 +96,9 @@ async def execute(
     rng = np.random.default_rng(seed)
     born = set()
     wave: dict[str, Any] = {
-        "version": 3,
+        "version": 4,
         "seed": seed,
-        "fit_protocol": "warm_multistart_v1",
+        "fit_protocol": "warm_multistart_v3",
         "idea_source": "generated" if discovery else "catalog",
         "idea_catalog": [asdict(i) for i in ideas],
         "graph": [baseline_node()],
@@ -91,14 +113,25 @@ async def execute(
         "k": k,
         "max_iter": max_iter,
         "starts": starts,
+        "patience": patience,
         "finalize": final is not None,
     }
     if discovery:
         config["new_probability"] = new_probability
+    if temperature is not None:
+        config["temperature"] = temperature
+    explored: dict[str, Any] = {}
+    fitted_parents: dict[tuple, tuple] = {}
 
     def next_choice(step):
         if discovery:
-            return draw_generated(nodes, references, history, rng, new_probability, step)
+            guide = None
+            if temperature is not None:
+                scores = {node: result["score"] for node, result in metrics.items()}
+                if "score" in explored:
+                    scores[BASELINE_ID] = explored["score"]
+                guide = Guide(scores, temperature)
+            return draw_generated(nodes, references, history, rng, new_probability, step, guide)
         return draw(ideas, references, attempts, rng, depth)
 
     def track_proposals(event):
@@ -115,8 +148,15 @@ async def execute(
                 equations.append(equation)
         del equations[:-8]
 
+    def adopt(node, candidate, result, parents):
+        """Make a fitted equation the idea's reference: its first, or with a temperature its best."""
+        if node in references and (temperature is None or result["score"] >= metrics[node]["score"]):
+            return
+        references[node], metrics[node], lineage[node] = candidate, result, parents
+
     if resume:
         saved = json.loads(path.read_text())
+        explored.update(saved.get("baseline_exploration") or {})
         fields = ("version", "seed", "idea_source", "planned_batches", "fit_protocol")
         if any(saved.get(key) != json.loads(json.dumps(wave[key])) for key in fields):
             raise ValueError("Run checkpoint does not match this frontier configuration.")
@@ -155,9 +195,7 @@ async def execute(
                 born.add(node)
                 if record["status"] == "fitted":
                     depth[nodes[node].branch] += 1
-                    if node not in references:
-                        references[node], metrics[node] = candidate, record["metrics"]
-                        lineage[node] = event["parents"]
+                    adopt(node, candidate, record["metrics"], event["parents"])
             track_proposals(event)
         if discovery:
             replayed = {event["node"] for event in saved["episodes"]}
@@ -174,11 +212,11 @@ async def execute(
     baseline_fit = double_gaussian_parent(up, starts)
     if "baseline_exploration" not in wave:
         wave["baseline_exploration"] = measure(baseline_fit.model, baseline_fit.solve, explore, max_iter)
-
-    fitted_parents: dict[tuple, tuple] = {}
+    explored.update(wave["baseline_exploration"])
 
     def parent_params(node, cohort, max_iter):
-        key = (node, id(cohort[0]), id(cohort[1]), max_iter)
+        equation = references[node].text if node in references else BASE
+        key = (node, equation, id(cohort[0]), id(cohort[1]), max_iter)
         if key not in fitted_parents:
             run = baseline_fit.solve if node == BASELINE_ID else solver(references[node], lineage[node])
             fitted_parents[key] = (cohort, run(cohort, max_iter)[3])
@@ -199,22 +237,26 @@ async def execute(
 
         return fit
 
-    @cache
     def reference_fit(node):
         if node == BASELINE_ID:
             return baseline_fit
+        return _reference_fit(node, references[node].text)
+
+    @cache
+    def _reference_fit(node, _equation):
         candidate = references[node]
         return ParentFit(node, candidate.model, candidate.estimator, solver(candidate, tuple(lineage[node])))
 
     def measure_node(equation, cohort, parents):
         return measure(equation.model, solver(equation, tuple(parents)), cohort, max_iter)
 
-    def evaluate(proposal, event, step, *, replaces=None, replacement=False):
+    def evaluate(proposal, event, step, *, replaces=None, turn=0):
+        """Compile, dedupe and fit one proposal; return None if it was fitted, else (reason, detail)."""
         node, parents = event["node"], event["parents"]
         idea = nodes[node]
         record = {"proposal": proposal}
-        if replacement:
-            record["source"] = "retry"
+        if turn:
+            record.update(source="retry", turn=turn)
             if replaces is not None:
                 record["replaces"] = replaces
         event["candidates"].append(record)
@@ -227,7 +269,9 @@ async def execute(
         text = candidate.text.strip()
         if text in exact or candidate.key in seen:
             record["status"] = "duplicate"
-            return ("exact_repeat", json.dumps(text)) if text in exact else None
+            if text in exact:
+                return "exact_repeat", f"{json.dumps(text)} was already proposed."
+            return "duplicate", "the same structure as an earlier equation, up to renaming or reordering."
         seen.add(candidate.key)
         exact.add(text)
         if node not in born:
@@ -238,12 +282,40 @@ async def execute(
             result = measure_node(candidate, explore, parents)
             record.update(status="fitted", metrics=result)
             depth[idea.branch] += 1
-            if node not in references:
-                references[node], metrics[node] = candidate, result
-                lineage[node] = parents
+            adopt(node, candidate, result, parents)
         except (ValueError, KeyError, TypeError, FloatingPointError, OverflowError) as exc:
             record.update(status="fit_failed", error=str(exc))
+            return (
+                "fit_failed",
+                "it could not be fitted: its values became undefined or overflowed during fitting.",
+            )
         return None
+
+    class Probe:
+        """The conversation's view of one batch: read replies, use equations, check equations."""
+
+        def __init__(self, event, step):
+            self.event, self.step = event, step
+
+        def decode(self, reply, expected):
+            try:
+                if expected is None:
+                    return decode_probe(reply, self.event, self.step)
+                if expected == FRESH:
+                    return equation_list(decode_json(reply), k, exact=False)
+                return decode(reply, expected)
+            except InvalidReply:
+                raise
+            except ValueError as exc:
+                raise InvalidReply("invalid_reply", str(exc)) from exc
+
+        def submit(self, proposal, replaces, turn):
+            return evaluate(proposal, self.event, self.step, replaces=replaces, turn=turn)
+
+        def check(self, proposals):
+            links = [parent_link(parent) for parent in self.event["parents"]]
+            results = [check_proposal(p, texts=exact, keys=seen, parents=links) for p in proposals]
+            return check_report(results)
 
     def decode_probe(reply, event, step):
         if not discovery:
@@ -277,7 +349,7 @@ async def execute(
             generated_prompt(choice, nodes, references, k, tried.get(node, ()))
             if discovery
             else idea_prompt(idea, parents, nodes, references, k)
-        )
+        ) + tool_note(patience)
         wave_number = step // batches
         event = {
             **choice,
@@ -296,82 +368,13 @@ async def execute(
         }
         _write(path, wave)
         batch = None
-        unreadable = None
-
         try:
             batch = prepare_images(up, *explore, seed=event["image_seed"], parents=fitted, max_iter=max_iter)
             event.update(cells=list(batch.cells), images=batch.count)
-            event["reply"] = await proposer.submit(batch, prompt)
-            proposals = decode_probe(event["reply"], event, step)
-        except InvalidReply as exc:
-            unreadable = exc
-            event["reply_error"] = {"reason_code": exc.code, "error": str(exc)}
-            proposals = []
         except ValueError as exc:
             event["error"] = str(exc)
-            proposals = []
-        targets = []
-        for position, proposal in enumerate(proposals, start=1):
-            rejected = evaluate(proposal, event, step)
-            if rejected is not None:
-                reason, detail = rejected
-                targets.append({"position": position, "reason_code": reason, "detail": detail})
-        retried = unreadable is not None
-        if unreadable is not None and batch is not None:
-            instruction = (
-                f"{unreadable.code}: {unreadable} Return the entire reply again in the requested format."
-            )
-            retry = event["retry"] = {"instruction": instruction, "reason_code": unreadable.code}
-            try:
-                retry["reply"] = await proposer.retry(batch, prompt, event["reply"] or "", instruction)
-                replacements = decode_probe(retry["reply"], event, step)
-            except ValueError as exc:
-                retry["error"] = str(exc)
-                event["error"] = str(unreadable)
-            else:
-                for replacement in replacements:
-                    evaluate(replacement, event, step, replacement=True)
-        elif targets and batch is not None:
-            retried = True
-            reasons = "\n".join(
-                f"- Proposal {target['position']}: {target['reason_code']} — {target['detail']}"
-                for target in targets
-            )
-            instruction = (
-                f"Replace these proposals from your original reply:\n{reasons}\n"
-                "Suggest one different equation for each listed proposal, keeping the same idea. "
-                f"Return only a JSON array of exactly {len(targets)} replacements in the listed order "
-                "and original format."
-            )
-            retry = event["retry"] = {"instruction": instruction, "targets": targets}
-            try:
-                retry["reply"] = await proposer.retry(batch, prompt, event["reply"], instruction)
-                replacements = decode(retry["reply"], len(targets))
-            except ValueError as exc:
-                retry["error"] = str(exc)
-            else:
-                for replacement, target in zip(replacements, targets, strict=True):
-                    evaluate(replacement, event, step, replaces=target["position"], replacement=True)
-        fitted_here = any(
-            record.get("status") == "fitted" for record in event["candidates"] if "status" in record
-        )
-        if batch is not None and not retried and not fitted_here:
-            instruction = (
-                "No equation from your last reply could be used. Return a fresh reply in the requested"
-                " format with materially different equations. Do not repeat earlier equations."
-            )
-            retry = event["retry"] = {"instruction": instruction, "reason_code": "no_usable_equation"}
-            try:
-                retry["reply"] = await proposer.retry(batch, prompt, event["reply"] or "", instruction)
-                if discovery and (event.get("idea") or event["kind"] == "revisit"):
-                    replacements = equation_list(decode_json(retry["reply"]), k, exact=False)
-                else:
-                    replacements = decode(retry["reply"], k)
-            except ValueError as exc:
-                retry["error"] = str(exc)
-            else:
-                for replacement in replacements:
-                    evaluate(replacement, event, step, replacement=True)
+        if batch is not None:
+            event.update(await converse(proposer, batch, prompt, Probe(event, step), k=k, patience=patience))
         log.info("Frontier episode %s: %s (%s images)", step + 1, node, event.get("images"))
         del wave["active_probe"]
         track_proposals(event)
@@ -461,10 +464,8 @@ class _Live:
     async def submit(self, batch, prompt):
         return await batch.submit(self.client, prompt, effort="none", temperature=0.5)
 
-    async def retry(self, batch, prompt, previous_reply, instruction):
-        return await batch.submit(
-            self.client, prompt, effort="none", temperature=0.5, followup=(previous_reply, instruction)
-        )
+    async def retry(self, batch, prompt, history):
+        return await batch.submit(self.client, prompt, effort="none", temperature=0.5, history=history)
 
 
 def run(args):
@@ -484,8 +485,8 @@ def run(args):
 
 
 def _run(args, output):
-    if min(args.waves, args.batches, args.k, args.starts) < 1 or args.seed < 0:
-        raise SystemExit("Use positive waves, batches, K and starts and a nonnegative seed.")
+    if min(args.waves, args.batches, args.k, args.starts) < 1 or args.seed < 0 or args.patience < 0:
+        raise SystemExit("Use positive waves, batches, K and starts, and a nonnegative seed and patience.")
     ideas = None
     if args.graph is not None:
         ideas = tuple(
@@ -504,6 +505,8 @@ def _run(args, output):
         validate_graph(ideas)
     if not 0 <= args.new_probability <= 1:
         raise SystemExit("--new-probability must be between zero and one.")
+    if args.temperature is not None and not args.temperature > 0:
+        raise SystemExit("--temperature must be positive.")
     entry = fetch_models(load_key()).get(MODEL)
     if not entry or not is_free(entry) or "image/png" not in entry["modalities"]["input"]:
         raise SystemExit(f"{MODEL} is not confirmed free with PNG support.")
@@ -522,6 +525,8 @@ def _run(args, output):
         "batches": args.batches,
         "k": args.k,
         "starts": args.starts,
+        "patience": args.patience,
+        "temperature": args.temperature,
         "waves": args.waves,
         "finalize": args.finalize,
         "idea_source": "generated" if ideas is None else "catalog",
@@ -555,6 +560,8 @@ def _run(args, output):
                 ideas=ideas,
                 new_probability=args.new_probability,
                 starts=args.starts,
+                patience=args.patience,
+                temperature=args.temperature,
                 resume=args.resume,
             )
         finally:

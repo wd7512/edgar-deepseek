@@ -1,0 +1,1 @@
+The OpenCode client also reads the key from `opencode_key`, the variable this cloud environment stores it in, after `OPENCODE_API_KEY_FILE` and `OPENCODE_API_KEY`. Runs here no longer need the key copied into another variable by hand.

@@ -134,3 +134,21 @@ def test_equations_that_differ_only_by_renaming_or_ordering_share_a_key():
     three = compile_equation({"equation": "b + a*cos(2*theta)", "initial": {"b": 1, "a": 2}})
     assert one.key == two.key
     assert one.key != three.key
+
+
+@pytest.mark.parametrize(
+    ("text", "hint"),
+    [
+        ("b + a*(1 if theta < 1 else 2)", "if condition else"),
+        ("b + a*(theta % pi)", "'%'"),
+        ("b + a*log(theta)", "'log'"),
+        ("b + a*np.exp(theta)", "np.exp"),
+        ("b + a*cos(theta) + (theta == a)", "single comparison"),
+        ("b + a*cos(theta) + 200", "-100 and 100"),
+    ],
+)
+def test_an_unsupported_construct_is_named_with_what_to_use_instead(text, hint):
+    with pytest.raises(InvalidEquation) as caught:
+        compile_equation({"equation": text, "initial": {"a": 1.0, "b": 1.0}})
+    assert caught.value.code == "unsupported_operator"
+    assert hint in str(caught.value)

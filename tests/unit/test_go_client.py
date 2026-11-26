@@ -7,10 +7,11 @@ import os
 import types
 
 import httpx
+import pytest
 
 from edgar_study.engine import install
 from edgar_study.frontier.images import FrontierImages
-from edgar_study.go_client import BudgetExhausted, GoClient, Ledger, role
+from edgar_study.go_client import BudgetExhausted, GoClient, Ledger, load_key, role
 
 
 def fake_transport(replies, bodies):
@@ -124,7 +125,8 @@ def test_sends_eighty_images_with_one_prompt_in_order(tmp_path, monkeypatch):
             batch = FrontierImages(tuple(range(10)), ("a", "b", "c", "d"), images)
             reply = await batch.submit(go, "Combine the ideas.")
             assert reply == "equations"
-            return await batch.submit(go, "Combine the ideas.", followup=(reply, "Suggest another equation."))
+            history = [(reply, "Suggest another equation."), ("more", "Check this one.")]
+            return await batch.submit(go, "Combine the ideas.", history=history)
         finally:
             await go.close()
 
@@ -141,6 +143,8 @@ def test_sends_eighty_images_with_one_prompt_in_order(tmp_path, monkeypatch):
         bodies[0]["messages"][0],
         {"role": "assistant", "content": "equations"},
         {"role": "user", "content": "Suggest another equation."},
+        {"role": "assistant", "content": "more"},
+        {"role": "user", "content": "Check this one."},
     ]
     rows = [json.loads(line) for line in (tmp_path / "api_calls.jsonl").read_text().splitlines()]
     assert all(row["image_count"] == 80 and row["image"] is True for row in rows)
@@ -199,3 +203,13 @@ async def check_blocked(directory):
 
 def test_each_call_records_how_long_the_event_loop_was_blocked_during_it(tmp_path):
     asyncio.run(check_blocked(tmp_path))
+
+
+def test_the_key_can_come_from_the_environments_stored_variable(monkeypatch):
+    for name in ("OPENCODE_API_KEY_FILE", "OPENCODE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("opencode_key", "stored-key")
+    assert load_key() == "stored-key"
+    monkeypatch.delenv("opencode_key")
+    with pytest.raises(RuntimeError, match="opencode_key"):
+        load_key()

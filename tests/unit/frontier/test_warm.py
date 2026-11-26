@@ -3,7 +3,7 @@ import pytest
 
 from edgar_study.frontier.grammar import compile_equation
 from edgar_study.frontier.protocol import fit_equation, split_trials
-from edgar_study.frontier.warm import Parent, warm_start
+from edgar_study.frontier.warm import Parent, complete_map, declared_probes, warm_start
 
 CELLS = 6
 
@@ -32,14 +32,77 @@ def parent_of(equation, node_id="parent", fitted=None):
     return Parent(node_id, names, equation.model, probes, lambda _cohort, _max_iter: fitted)
 
 
-def test_matching_names_carry_the_parents_fitted_values_and_new_parameters_keep_their_own_start():
+def test_matching_names_carry_the_parents_fitted_values_and_new_parameters_take_values_that_reproduce_it():
     parent = compile_("b + a*cos(theta)", {"b": 2, "a": 1})
     child = compile_("b + a*cos(theta) + c*sin(theta)", {"b": 0, "a": 0, "c": 0.5})
     link = parent_of(parent)
     start = warm_start(child, [link], cohort(), 100)
     np.testing.assert_allclose(start[:, 0], link.fit(None, 0)[:, 0])
     np.testing.assert_allclose(start[:, 1], link.fit(None, 0)[:, 1])
+    np.testing.assert_allclose(start[:, 2], 0.0)
+
+
+def test_a_child_whose_new_parameters_have_no_neutral_value_keeps_its_own_start_for_them():
+    parent = compile_("b + a*cos(theta)", {"b": 2, "a": 1})
+    child = compile_("b + a*cos(theta) + (c-2)*sin(theta)", {"b": 0, "a": 0, "c": 0.5})
+    link = parent_of(parent)
+    start = warm_start(child, [link], cohort(), 100)
+    np.testing.assert_allclose(start[:, 1], link.fit(None, 0)[:, 1])
     np.testing.assert_allclose(start[:, 2], 0.5)
+
+
+GAUSS = "b + a1*exp(-0.5*(wrap(theta-m)/s)**2) + a2*exp(-0.5*(wrap(theta-m-pi)/s)**2)"
+GAUSS_START = {"b": 0.3, "a1": 2.0, "a2": 1.0, "m": 1.0, "s": 0.4}
+SHIFTED = "b + a1*exp(-0.5*(wrap(theta-(m+d1))/s)**2) + a2*exp(-0.5*(wrap(theta-(m+pi+d2))/s)**2)"
+WIDTHS = "b + a1*exp(-0.5*(wrap(theta-m)/s1)**2)*(1+tanh(k1*wrap(theta-m))) + a2*exp(-0.5*(wrap(theta-m-pi)/s2)**2)"
+
+
+def gauss_parent():
+    equation = compile_(GAUSS, GAUSS_START)
+    return Parent("double_gaussian", tuple(equation.initial), equation.model, declared_probes(equation), None)
+
+
+def test_a_map_that_leaves_out_new_parameters_is_completed_with_values_that_reproduce_the_parent():
+    declared = {"double_gaussian": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s": "s"}}
+    child = compile_(SHIFTED, {**GAUSS_START, "d1": 0.2, "d2": -0.1}, declared)
+
+    found = complete_map(child, gauss_parent())
+
+    assert found is not None
+    assert found.bindings == {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s": "s", "d1": 0.0, "d2": 0.0}
+    assert not found.declared
+
+
+def test_with_no_map_numbered_copies_of_a_parent_parameter_and_neutral_values_are_found():
+    child = compile_(WIDTHS, {"b": 0.3, "a1": 2.0, "a2": 1.0, "m": 1.0, "s1": 0.3, "s2": 0.5, "k1": 0.4})
+
+    found = complete_map(child, gauss_parent())
+
+    assert found is not None
+    assert found.bindings["s1"] == "s" and found.bindings["s2"] == "s" and found.bindings["k1"] == 0.0
+
+
+def test_a_wrong_declared_binding_is_repaired():
+    declared = {
+        "double_gaussian": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s": "s", "d1": 0.3, "d2": 0.0}
+    }
+    child = compile_(SHIFTED, {**GAUSS_START, "d1": 0.2, "d2": -0.1}, declared)
+
+    assert complete_map(child, gauss_parent()).bindings["d1"] == 0.0
+
+
+def test_a_correct_declared_map_is_kept_as_declared():
+    declared = {
+        "double_gaussian": {"b": "b", "a1": "a1", "a2": "a2", "m": "m", "s": "s", "d1": 0.0, "d2": 0.0}
+    }
+    child = compile_(SHIFTED, {**GAUSS_START, "d1": 0.2, "d2": -0.1}, declared)
+
+    assert complete_map(child, gauss_parent()).declared
+
+
+def test_a_child_that_does_not_contain_its_parent_gets_no_map():
+    laplace = compile_("b + a1*exp(-abs(wrap(theta-m))/s) + a2*exp(-abs(wrap(theta-m-pi))/s)", GAUSS_START)
+    assert complete_map(laplace, gauss_parent()) is None
 
 
 def test_a_parent_sharing_no_names_with_the_child_gives_no_warm_start():
@@ -75,12 +138,20 @@ def test_a_nesting_map_that_does_not_reproduce_the_parent_is_rejected():
         {"p": "b", "q": "a", "r": "missing"},
         {"p": "b", "q": "a", "r": [1, 2]},
         {"p": "b", "q": "a", "r": 1000},
-        "not a map",
     ],
 )
-def test_malformed_nesting_maps_are_ignored(bindings):
+def test_malformed_or_missing_entries_are_dropped_and_the_rest_of_the_map_is_completed(bindings):
     parent = compile_("b + a*cos(theta)", {"b": 2, "a": 1})
     child = compile_("p + q*cos(theta) + r*sin(theta)", {"p": 0, "q": 0, "r": 0.5}, {"parent": bindings})
+    link = parent_of(parent)
+    start = warm_start(child, [link], cohort(), 100)
+    np.testing.assert_allclose(start[:, :2], link.fit(None, 0), rtol=1e-6)
+    np.testing.assert_allclose(start[:, 2], 0)
+
+
+def test_a_map_that_is_not_an_object_and_shares_no_names_gives_no_warm_start():
+    parent = compile_("b + a*cos(theta)", {"b": 2, "a": 1})
+    child = compile_("p + q*cos(theta) + r*sin(theta)", {"p": 0, "q": 0, "r": 0.5}, {"parent": "not a map"})
     assert warm_start(child, [parent_of(parent)], cohort(), 100) is None
 
 

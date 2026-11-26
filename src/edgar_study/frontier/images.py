@@ -52,7 +52,7 @@ class FrontierImages:
         *,
         effort: str | None = None,
         temperature: float | None = None,
-        followup: tuple[str, str] | None = None,
+        history: Sequence[tuple[str, str]] = (),
     ) -> str | None:
         """Submit the prompt and all parent/neuron image pairs to HY4 Flash Free."""
         if len(self.parent_ids) > 1:
@@ -64,7 +64,7 @@ class FrontierImages:
             images=self.images,
             effort=effort,
             temperature=temperature,
-            followup=followup,
+            history=history,
         )
 
 

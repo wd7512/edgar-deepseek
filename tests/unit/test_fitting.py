@@ -213,3 +213,89 @@ def test_with_no_iterations_allowed_the_starts_come_back_unchanged():
     fit = fitting.fit_lm_bounded(_cosine, start, theta, y, max_iterations=0)
     np.testing.assert_array_equal(fit.params, start)
     assert (fit.iterations, fit.stopped) == (0, 0)
+
+
+def test_pruning_keeps_each_cells_leading_start_and_never_ends_worse_than_it():
+    theta, y, start = _cosine_cells()
+    candidates = fitting.perturbed_starts(start, 6, seed=2)
+
+    leaders = fitting.fit_from_starts(_cosine, candidates, theta, y, max_iterations=3)
+    pruned = fitting.fit_pruned(_cosine, candidates, theta, y, prune_after=3, max_iterations=50)
+
+    assert np.all(_squared_error(pruned.params, theta, y) <= _squared_error(leaders.params, theta, y) + 1e-5)
+    np.testing.assert_array_equal(pruned.best_start, leaders.best_start)
+    assert np.all(_squared_error(pruned.params, theta, y) < 1e-3)
+
+
+def test_pruning_after_the_whole_budget_is_the_same_as_fitting_every_start():
+    theta, y, start = _cosine_cells()
+    candidates = fitting.perturbed_starts(start, 4, seed=3)
+
+    every = fitting.fit_from_starts(_cosine, candidates, theta, y, max_iterations=20)
+    pruned = fitting.fit_pruned(_cosine, candidates, theta, y, prune_after=20, max_iterations=20)
+
+    np.testing.assert_array_equal(pruned.params, every.params)
+
+
+@pytest.mark.parametrize("chunk", [1, 3, 7])
+def test_dropping_finished_fits_between_chunks_changes_no_fit(chunk):
+    winner = next(c for c in curves.CURVES if c.name == curves.WINNER)
+    x, y = curves.synthetic_cells(13, 120)
+    start = np.stack([winner.estimator(np.asarray(x[i]), np.asarray(y[i])) for i in range(13)])
+    start = np.concatenate([start, start * 1.3])
+    x, y = np.concatenate([x, x]), np.concatenate([y, y])
+
+    whole = fitting.fit_lm_bounded(winner.model, start, x, y, max_iterations=60, chunk=None)
+    chunked = fitting.fit_lm_bounded(winner.model, start, x, y, max_iterations=60, chunk=chunk)
+
+    np.testing.assert_allclose(chunked.params, whole.params, rtol=1e-5, atol=1e-6)
+    assert (chunked.iterations, chunked.stopped) == (whole.iterations, whole.stopped)
+
+
+def _needle(theta, a, h):
+    import jax.numpy as jnp
+
+    return a + h * jnp.exp(-0.5 * ((jnp.mod(theta - 1.0 + jnp.pi, 2 * jnp.pi) - jnp.pi) / 0.001) ** 2)
+
+
+def _needle_cells(heights=(1e6, 0.0)):
+    theta = np.tile(np.mod(np.linspace(1.1, 1.1 + 2 * np.pi - 0.2, 60), 2 * np.pi).astype(np.float32), (3, 1))
+    y = (2.0 + 0.1 * np.sin(5 * theta)).astype(np.float32)
+    level = y.mean(axis=1)
+    starts = [np.stack([level + 0.1 * i, np.full(3, h)], axis=1) for i, h in enumerate(heights)]
+    return theta, y, np.stack(starts).astype(np.float32)
+
+
+def test_a_spike_between_training_angles_is_invisible_to_the_training_error():
+    theta, y, candidates = _needle_cells()
+    fit = fitting.fit_from_starts(_needle, candidates, theta, y, max_iterations=0)
+    assert np.all(fit.best_start == 0)
+
+
+def test_a_start_whose_curve_leaves_the_response_band_is_not_chosen():
+    theta, y, candidates = _needle_cells()
+    band = fitting.response_band(y)
+    fit = fitting.fit_from_starts(_needle, candidates, theta, y, max_iterations=0, band=band)
+    assert np.all(fit.best_start == 1)
+    np.testing.assert_allclose(fit.params, candidates[1])
+
+
+def test_when_every_start_leaves_the_band_the_lowest_training_error_is_kept():
+    theta, y, candidates = _needle_cells(heights=(1e6, 1e6))
+    fit = fitting.fit_from_starts(
+        _needle, candidates, theta, y, max_iterations=0, band=fitting.response_band(y)
+    )
+    assert np.all(fit.best_start == 0)
+
+
+def test_the_response_band_widens_each_cells_range_by_that_range_and_never_collapses():
+    y = np.array([[0.0, 2.0, 1.0], [3.0, 3.0, 3.0]], dtype=np.float32)
+    np.testing.assert_allclose(fitting.response_band(y), [[-2.0, 4.0], [2.0, 4.0]])
+
+
+def test_curves_are_checked_on_a_grid_fine_enough_to_find_a_needle_a_tenth_of_a_degree_wide():
+    theta, y, candidates = _needle_cells()
+    inside = fitting.within_band(
+        _needle, candidates.reshape(-1, 2), np.tile(fitting.response_band(y), (2, 1))
+    )
+    assert inside.tolist() == [False] * 3 + [True] * 3

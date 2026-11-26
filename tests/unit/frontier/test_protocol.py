@@ -307,13 +307,7 @@ def test_a_single_iteration_still_returns_finite_parameters_no_worse_than_the_st
     "scale",
     [
         1e-3,
-        pytest.param(
-            50,
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="The step cap of 0.25 per iteration limits travel to about 25 units; see relative_step.",
-            ),
-        ),
+        50,
     ],
 )
 def test_responses_on_very_different_scales_are_fitted_to_the_same_relative_accuracy(scale):
@@ -321,6 +315,12 @@ def test_responses_on_very_different_scales_are_fitted_to_the_same_relative_accu
     initial = {"m": 3.0, "b": 0.3 * scale, "a1": 1.5 * scale, "a2": 1.0 * scale, "s": 0.6}
     result = fit_equation(equation(initial=initial), (theta, y * scale), 100)
     assert result.training_mse < 3 * (SIGMA * scale) ** 2
+
+
+def test_a_declared_amplitude_far_below_the_data_still_reaches_it():
+    theta, y = double_gaussian_cohort()
+    result = fit_equation(equation(), (theta, 40 * y), 100)
+    assert result.training_mse < 3 * (40 * SIGMA) ** 2
 
 
 def test_parameters_far_from_the_truth_in_declared_values_do_not_stop_a_good_fit():
@@ -342,14 +342,34 @@ def test_fitting_only_the_training_trials_gives_the_protocols_parameters():
     np.testing.assert_array_equal(alone, whole.params)
 
 
-def test_a_training_fit_can_use_more_iterations_and_a_relative_step_cap():
+def test_the_protocols_relative_step_cap_reaches_a_far_start_that_an_absolute_cap_cannot():
     x, y = double_gaussian_cohort(cells=4)
     far = equation(initial={**DOUBLE_GAUSSIAN_START, "a1": 40.0})
 
-    capped = fit_equation_training(far, x, y, 100)
-    relative = fit_equation_training(far, x, y, 300, relative_step=True)
+    capped = fit_equation_training(far, x, y, 100, relative_step=False)
+    relative = fit_equation_training(far, x, y, 100)
 
     def error(params):
         return float(np.mean((np.asarray(predict(far.model, x, params)) - y) ** 2))
 
     assert error(relative) < error(capped)
+
+
+def test_a_start_that_spikes_between_training_angles_is_never_chosen_for_its_lower_training_error():
+    theta, y = double_gaussian_cohort(cells=4, trials=72)
+    train, _ = split_trials(theta)
+    spiky = equation(
+        "b + a1*exp(-0.5*(wrap(theta-m)/s)**2) + a2*exp(-0.5*(wrap(theta-m-pi)/s)**2) "
+        "+ h*exp(-0.5*(wrap(theta-c)/0.0005)**2)",
+        {**DOUBLE_GAUSSIAN_START, "h": 0.0, "c": 0.0},
+    )
+    good = fit_equation(equation(), (theta, y), 100, starts=1).params
+    gaps = np.sort(np.asarray(theta)[0, np.asarray(train)])
+    middle = float(gaps[np.argmax(np.diff(gaps))] + np.max(np.diff(gaps)) / 2)
+    names = list(spiky.initial)
+    reference = dict(zip(equation().initial, good.T, strict=True))
+    needle = np.stack([reference.get(n, np.full(4, {"h": 1e6, "c": middle}.get(n, 0.0))) for n in names], 1)
+    params = fit_equation_training(
+        spiky, np.asarray(theta)[:, train], np.asarray(y)[:, train], 0, warm=needle, starts=2
+    )
+    assert np.all(params[:, names.index("h")] < 1e3)

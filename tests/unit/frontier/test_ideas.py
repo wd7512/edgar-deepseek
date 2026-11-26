@@ -3,7 +3,7 @@ from collections import Counter
 import numpy as np
 import pytest
 
-from edgar_study.frontier.ideas import Idea, draw, draw_generated, generated_idea, validate_graph
+from edgar_study.frontier.ideas import Guide, Idea, draw, draw_generated, generated_idea, validate_graph
 from edgar_study.frontier.replies import InvalidReply
 
 
@@ -160,3 +160,58 @@ def test_catalog_draw_returns_nothing_until_a_complete_route_is_fitted():
     assert first["node"] == "a"
     assert all(row["node"] == "a" for row in first["eligible"])
     assert {row["node"] for row in draw(ideas, {"a": object()}, {}, rng)["eligible"]} == {"a", "b"}
+
+
+def _guided_nodes():
+    return {
+        name: Idea(name, "single_idea", name, f"Idea {name}.", (("double_gaussian",),), "frontier", name)
+        for name in ("good", "poor")
+    }
+
+
+def test_a_guide_draws_better_fitting_parents_more_often_but_never_excludes_one():
+    guide = Guide({"double_gaussian": 28.6, "good": 28.5, "poor": 29.5}, temperature=0.1)
+    references = {"good": None, "poor": None}
+    counts = Counter()
+    for seed in range(400):
+        choice = draw_generated(_guided_nodes(), references, {}, np.random.default_rng(seed), 1, 5, guide)
+        if choice["mode"] in ("single_idea", "anomaly_detour"):
+            counts.update(choice["parents"])
+            probabilities = choice["parent_probabilities"]
+    assert counts["good"] > 2 * counts["double_gaussian"] > 0
+    assert probabilities["poor"] > 0 and counts["poor"] < counts["good"] / 20
+
+
+def test_a_guided_combination_draws_two_different_parents():
+    guide = Guide({"double_gaussian": 28.6, "good": 28.5, "poor": 28.55}, temperature=0.1)
+    pairs = [
+        choice["parents"]
+        for seed in range(300)
+        if (
+            choice := draw_generated(
+                _guided_nodes(), {"good": None, "poor": None}, {}, np.random.default_rng(seed), 1, 5, guide
+            )
+        )["mode"]
+        == "combination"
+    ]
+    assert pairs and all(len(set(pair)) == 2 for pair in pairs)
+
+
+def test_a_guide_favours_combinations_over_unrelated_roots():
+    guide = Guide({"double_gaussian": 28.6, "good": 28.5, "poor": 28.55}, temperature=0.1)
+    modes = Counter(
+        draw_generated(
+            _guided_nodes(), {"good": None, "poor": None}, {}, np.random.default_rng(s), 1, 5, guide
+        )["mode"]
+        for s in range(2000)
+    )
+    assert modes["combination"] > 4 * modes["independent_root"] > 0
+
+
+def test_guided_revisits_favour_better_fitting_ideas():
+    guide = Guide({"double_gaussian": 28.6, "good": 28.5, "poor": 29.5}, temperature=0.1)
+    choice = draw_generated(
+        _guided_nodes(), {"good": None, "poor": None}, {}, np.random.default_rng(0), 0, 5, guide
+    )
+    weights = choice["node_probabilities"]
+    assert weights["good"] > 10 * weights["poor"] > 0

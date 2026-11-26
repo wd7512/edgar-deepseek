@@ -52,6 +52,41 @@ class InvalidEquation(ValueError):
         self.code = code
 
 
+SYMBOLS = {
+    ast.Mod: "%",
+    ast.FloorDiv: "//",
+    ast.MatMult: "@",
+    ast.BitAnd: "&",
+    ast.BitOr: "|",
+    ast.BitXor: "^",
+}
+ALLOWED = "Use + - * / **, sin, cos, exp, tanh, abs, sqrt, wrap and one comparison with <, <=, > or >=."
+
+
+def _unsupported(node):
+    """Name the construct the grammar does not accept, and what to use instead."""
+    if isinstance(node, ast.IfExp):
+        detail = (
+            "'x if condition else y' is not supported; multiply a term by a comparison such as (theta < c)."
+        )
+    elif isinstance(node, ast.BinOp):
+        symbol = SYMBOLS.get(type(node.op), type(node.op).__name__)
+        detail = f"Operator '{symbol}' is not supported; use wrap() for periodic distances."
+    elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        detail = f"Use plain function names, not {ast.unparse(node.func)}."
+    elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id not in FUNCTIONS:
+        detail = f"Function '{node.func.id}' is not supported."
+    elif isinstance(node, ast.Call):
+        detail = "Each function takes exactly one argument."
+    elif isinstance(node, ast.Compare):
+        detail = "Use a single comparison with <, <=, > or >=."
+    elif isinstance(node, ast.Constant):
+        detail = "Numbers must be between -100 and 100."
+    else:
+        detail = f"{type(node).__name__} is not supported."
+    return f"{detail} {ALLOWED}"
+
+
 def compile_equation(proposal):
     """Compile a small numeric expression tree without executing generated Python."""
     if not isinstance(proposal, dict):
@@ -110,7 +145,7 @@ def compile_equation(proposal):
             and not node.keywords
         ):
             return ("call", node.func.id, build(node.args[0]))
-        raise InvalidEquation("unsupported_operator", "Expression uses an unsupported operation or name.")
+        raise InvalidEquation("unsupported_operator", _unsupported(node))
 
     tree = build(expr)
     if set(initial) != used - {"pi", "theta"} or "theta" not in used:

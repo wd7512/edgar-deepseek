@@ -4,6 +4,10 @@ import json
 
 from edgar_study.frontier.seed import BASE, BASELINE_ID
 
+SINGLE_EXPRESSION = (
+    "Each 'equation' is a single expression in theta: no assignments, statements, 'return' or line breaks."
+)
+
 
 def generated_prompt(choice, nodes, references, k, tried=()):
     selected = choice["node"]
@@ -11,7 +15,7 @@ def generated_prompt(choice, nodes, references, k, tried=()):
         idea = nodes[selected]
         task = (
             f"Revisit {idea.label}: {idea.text}. Keep the same idea and give new implementations. "
-            f"Return only a JSON array with zero to {k} equation objects."
+            f"Return only a JSON array with up to {k} equation objects; each distinct equation is another try."
         )
         if tried:
             task += f" Already tried for this idea (do not repeat): {json.dumps(list(tried))}."
@@ -34,7 +38,8 @@ def generated_prompt(choice, nodes, references, k, tried=()):
             "The idea has a short, concise 'title' you choose and a concrete 'change'. "
             "The optional 'mechanism' names the changed component, for example offset, width, amplitude, "
             "centre, baseline, shape, kernel, or mixture; it defaults to the title. "
-            f"Provide zero to {k} structurally distinct equations in 'equations'."
+            f"Provide up to {k} structurally distinct equations in 'equations'; each distinct equation is"
+            " another try at the idea."
         )
     parents = [
         f"{name}: {BASE}"
@@ -46,10 +51,12 @@ def generated_prompt(choice, nodes, references, k, tried=()):
         f"{task}\nSelected parents: {json.dumps(parents)}.\n"
         "Use theta in radians, periodic with period 2*pi. Use + - * / **, "
         "sin, cos, exp, tanh, abs, sqrt, wrap, or a smooth cutoff using <, <=, >, or >=. "
+        f"{SINGLE_EXPRESSION} "
         "Declare every symbol you use except theta and pi in 'initial'. "
         "Each equation object has 'equation', 'initial' (parameter names to numeric starts), and "
-        "'parameters' (definitions). Optionally include 'nesting': parent ID to a map from each new "
-        "parameter to a parent parameter name, a number, or [parent parameter name, scale, shift]. "
+        "'parameters' (definitions). Optionally include 'nesting': parent ID to a map giving every parameter "
+        "of the new equation as a parent parameter name, a number, or [parent parameter name, scale, shift], "
+        "so that the map turns the new equation back into the parent exactly. "
         "For double_gaussian use parent parameter names m, b, a1, a2, s. Do not fit or rank."
     )
 
@@ -88,11 +95,25 @@ def idea_prompt(idea, parents, definitions, references, k):
         brief + "\nDo not add an unrelated mechanism. Respect the stated fixed parts. "
         "Use theta in radians, periodic with period 2*pi. Use + - * / ** and "
         "sin, cos, exp, tanh, abs, sqrt or wrap. Comparisons with <, <=, >, or >= give smooth cutoffs."
+        f" {SINGLE_EXPRESSION}"
         " Declare every symbol except theta and pi in initial."
         " Keep expressions short. Return only a JSON array of objects with "
         "'equation' (expression), 'initial' (parameter names mapped to numeric starting values), "
         "and 'parameters' (free parameter definitions). If a simpler equation is an exact special case,"
         " optionally include 'nesting': an object keyed by the parent idea ID (or 'double_gaussian' for the base)."
-        " Each value maps every new equation parameter to a parent parameter name, a numeric constant, or"
-        " [parent parameter name, scale, shift] meaning scale * parent + shift. Do not fit or rank."
+        " Each value maps every parameter of the new equation to a parent parameter name, a numeric constant,"
+        " or [parent parameter name, scale, shift] meaning scale * parent + shift. Do not fit or rank."
+    )
+
+
+def tool_note(patience):
+    """How the model can check equations before answering, and how many follow-up turns it has."""
+    if patience < 1:
+        return ""
+    return (
+        '\nYou may check equations before answering: reply with only {"check": [equation objects]} and'
+        " you get a validity report covering syntax, repeats of earlier equations, values at your starting"
+        " values, and whether each nesting map turns the equation back into its parent. Equations that"
+        f" cannot be used are reported back for replacement. You have {patience} follow-up turns in this"
+        " conversation for checks and fixes."
     )
